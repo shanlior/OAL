@@ -201,7 +201,7 @@ class RankBasedPrioritizedReplayBuffer(PrioritizedReplayBuffer):
         assert len(idxes) == len(td_errors)
         for i in range(len(idxes)):
             assert 0 <= idxes[i] < len(self._storage)
-            self._it_ranked.add_task(idxes[i], priority=td_errors[i])
+            self._it_ranked.add_transition(idxes[i], td_error=td_errors[i])
 
         return None
 

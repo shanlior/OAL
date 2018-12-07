@@ -240,7 +240,7 @@ class DQN(OffPolicyRLModel):
                         # Using rank based prioritization
                         if self.rank_based_prioritization:
                             # get rank of i when buffer sorted acording td_error(i)
-                            print('step: ', step)
+                            new_priorities = None # set to None because computed internally in update_priorities()
                             self.replay_buffer.update_rank(batch_idxes, np.abs(td_errors))
                         # Using proportional prioritization
                         else:

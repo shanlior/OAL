@@ -32,7 +32,9 @@ class PriorityQueue(object):
         n_transitions = len(self.pq)
         if self.ranks[transition] < n_transitions:
             for k in range(self.ranks[transition], n_transitions):
-                self.ranks[self.pq[k][2]] += 1
+                #print("hihihihih: ", self.pq[k][2])
+                if self.pq[k][2] is not self.REMOVED:
+                    self.ranks[self.pq[k][2]] += 1
 
     def remove_transition(self, transition):
         """
@@ -43,7 +45,8 @@ class PriorityQueue(object):
         n_transitions = len(self.pq)
         if self.ranks[transition] < n_transitions:
             for k in range(self.ranks[transition]):
-                self.ranks[self.pq[k][2]] -= 1
+                if self.pq[k][2] is not self.REMOVED:
+                    self.ranks[self.pq[k][2]] -= 1
         # Removing the transition from data structures (ranking dict & entry-finder)
         del self.ranks[transition]
         entry = self.entry_finder.pop(transition)
@@ -60,7 +63,8 @@ class PriorityQueue(object):
                 n_transitions = len(self.pq)
                 if self.ranks[transition] < n_transitions:
                     for k in range(self.ranks[transition]):
-                        self.ranks[self.pq[k][2]] -= 1
+                        if self.pq[k][2] is not self.REMOVED:
+                            self.ranks[self.pq[k][2]] -= 1
                 # Removing from data structures
                 del self.ranks[transition]
                 del self.entry_finder[transition]
