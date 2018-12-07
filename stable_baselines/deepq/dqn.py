@@ -8,7 +8,7 @@ from stable_baselines import logger, deepq
 from stable_baselines.common import tf_util, OffPolicyRLModel, SetVerbosity, TensorboardWriter
 from stable_baselines.common.vec_env import VecEnv
 from stable_baselines.common.schedules import LinearSchedule
-from stable_baselines.deepq.replay_buffer import ReplayBuffer, PrioritizedReplayBuffer
+from stable_baselines.deepq.replay_buffer import ReplayBuffer, PrioritizedReplayBuffer, RankBasedPrioritizedReplayBuffer
 from stable_baselines.deepq.policies import DQNPolicy
 from stable_baselines.a2c.utils import find_trainable_variables, total_episode_reward_logger
 
@@ -35,6 +35,7 @@ class DQN(OffPolicyRLModel):
     :param learning_starts: (int) how many steps of the model to collect transitions for before learning starts
     :param target_network_update_freq: (int) update the target network every `target_network_update_freq` steps.
     :param prioritized_replay: (bool) if True prioritized replay buffer will be used.
+    :param rank_based_prioritization: (bool) if True rank-based prioritized replay buffer will be used.
     :param prioritized_replay_alpha: (float) alpha parameter for prioritized replay buffer
     :param prioritized_replay_beta0: (float) initial value of beta for prioritized replay buffer
     :param prioritized_replay_beta_iters: (int) number of iterations over which beta will be annealed from initial
@@ -49,9 +50,9 @@ class DQN(OffPolicyRLModel):
     def __init__(self, policy, env, gamma=0.99, learning_rate=5e-4, buffer_size=50000, exploration_fraction=0.1,
                  exploration_final_eps=0.02, train_freq=1, batch_size=32, checkpoint_freq=10000, checkpoint_path=None,
                  learning_starts=1000, target_network_update_freq=500, prioritized_replay=False,
-                 prioritized_replay_alpha=0.6, prioritized_replay_beta0=0.4, prioritized_replay_beta_iters=None,
-                 prioritized_replay_eps=1e-6, param_noise=False, verbose=0, tensorboard_log=None,
-                 _init_setup_model=True):
+                 rank_based_prioritization=False, prioritized_replay_alpha=0.6, prioritized_replay_beta0=0.4,
+                 prioritized_replay_beta_iters=None, prioritized_replay_eps=1e-6, param_noise=False, verbose=0,
+                 tensorboard_log=None, _init_setup_model=True):
 
         # TODO: replay_buffer refactoring
         super(DQN, self).__init__(policy=policy, env=env, replay_buffer=None, verbose=verbose, policy_base=DQNPolicy,
@@ -62,6 +63,7 @@ class DQN(OffPolicyRLModel):
         self.learning_starts = learning_starts
         self.train_freq = train_freq
         self.prioritized_replay = prioritized_replay
+        self.rank_based_prioritization = rank_based_prioritization
         self.prioritized_replay_eps = prioritized_replay_eps
         self.batch_size = batch_size
         self.target_network_update_freq = target_network_update_freq
@@ -138,7 +140,11 @@ class DQN(OffPolicyRLModel):
 
             # Create the replay buffer
             if self.prioritized_replay:
-                self.replay_buffer = PrioritizedReplayBuffer(self.buffer_size, alpha=self.prioritized_replay_alpha)
+                if self.rank_based_prioritization:
+                    self.replay_buffer = RankBasedPrioritizedReplayBuffer(self.buffer_size,
+                                                                          alpha=self.prioritized_replay_alpha)
+                else:
+                    self.replay_buffer = PrioritizedReplayBuffer(self.buffer_size, alpha=self.prioritized_replay_alpha)
                 if self.prioritized_replay_beta_iters is None:
                     prioritized_replay_beta_iters = total_timesteps
                     self.beta_schedule = LinearSchedule(prioritized_replay_beta_iters,
@@ -230,7 +236,15 @@ class DQN(OffPolicyRLModel):
                                                         sess=self.sess)
 
                     if self.prioritized_replay:
-                        new_priorities = np.abs(td_errors) + self.prioritized_replay_eps
+
+                        # Using rank based prioritization
+                        if self.rank_based_prioritization:
+                            # get rank of i when buffer sorted acording td_error(i)
+                            print('step: ', step)
+                            self.replay_buffer.update_rank(batch_idxes, np.abs(td_errors))
+                        # Using proportional prioritization
+                        else:
+                            new_priorities = np.abs(td_errors) + self.prioritized_replay_eps
                         self.replay_buffer.update_priorities(batch_idxes, new_priorities)
 
                 if step > self.learning_starts and step % self.target_network_update_freq == 0:
