@@ -3,6 +3,7 @@ import random
 import numpy as np
 
 from stable_baselines.common.segment_tree import SumSegmentTree, MinSegmentTree
+from stable_baselines.common.priority_queue import PriorityQueue
 
 
 class ReplayBuffer(object):
@@ -162,6 +163,60 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         :param priorities: ([float]) List of updated priorities corresponding to transitions at the sampled idxes
             denoted by variable `idxes`.
         """
+        assert len(idxes) == len(priorities)
+        for idx, priority in zip(idxes, priorities):
+            assert priority > 0
+            assert 0 <= idx < len(self._storage)
+            self._it_sum[idx] = priority ** self._alpha
+            self._it_min[idx] = priority ** self._alpha
+
+            self._max_priority = max(self._max_priority, priority)
+
+
+class RankBasedPrioritizedReplayBuffer(PrioritizedReplayBuffer):
+
+    def __init__(self, size, alpha):
+        """
+        Create Rank Based Prioritized Replay buffer.
+
+        See Also ReplayBuffer.__init__
+
+        :param size: (int) Max number of transitions to store in the buffer. When the buffer overflows the old memories
+            are dropped.
+        :param alpha: (float) how much prioritization is used (0 - no prioritization, 1 - full prioritization)
+        """
+        super(RankBasedPrioritizedReplayBuffer, self).__init__(size, alpha)
+        self._it_ranked = PriorityQueue()
+
+    def update_rank(self, idxes, td_errors):
+        """
+        Update transitions' rank using errors.
+
+        sets priority of transition at index idxes[i] in buffer
+        to priorities[i].
+
+        :param idxes: ([int]) List of idxes of sampled transitions
+        :param td_errors: ([float]) List transitions td_errors
+        """
+        assert len(idxes) == len(td_errors)
+        for i in range(len(idxes)):
+            assert 0 <= idxes[i] < len(self._storage)
+            self._it_ranked.add_task(idxes[i], priority=td_errors[i])
+
+        return None
+
+    def update_priorities(self, idxes, priorities=None):
+        """
+        Update priorities of sampled transitions.
+
+        sets priority of transition at index idxes[i] in buffer
+        to priorities[i].
+
+        :param idxes: ([int]) List of idxes of sampled transitions
+        :param priorities: ([float]) List of updated priorities corresponding to transitions at the sampled idxes
+            denoted by variable `idxes`.
+        """
+        priorities = self._it_ranked.get_priorities(idxes)
         assert len(idxes) == len(priorities)
         for idx, priority in zip(idxes, priorities):
             assert priority > 0
