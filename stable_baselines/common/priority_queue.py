@@ -6,10 +6,20 @@ import itertools
 class PriorityQueue(object):
 
     def __init__(self):
-        self.pq = []                         # list of entries arranged in a heap
-        self.entry_finder = {}               # mapping of transitions to entries
-        self.REMOVED = '<removed-transition>'      # placeholder for a removed transition
-        self.counter = itertools.count()     # unique sequence count
+        """
+        Build a Priority queue data structure:
+
+        https://en.wikipedia.org/wiki/Priority_queue
+
+        using a min-heap as in
+
+        https://docs.python.org/3.5/library/heapq.html
+        """
+
+        self.pq = []  # list of entries arranged in a heap
+        self.entry_finder = {}  # mapping of transitions to entries
+        self.REMOVED = '<removed-transition>'  # placeholder for a removed transition
+        self.counter = itertools.count()  # unique sequence count
         self.ranks = {}
 
     def add_transition(self, transition, td_error=0):
@@ -31,22 +41,23 @@ class PriorityQueue(object):
         # update rank of following transitions/transitions
         n_transitions = len(self.pq)
         if self.ranks[transition] < n_transitions:
+            list_to_update = heapq.nlargest(len(self.pq), self.pq)
             for k in range(self.ranks[transition], n_transitions):
-                #print("hihihihih: ", self.pq[k][2])
-                if self.pq[k][2] is not self.REMOVED:
-                    self.ranks[self.pq[k][2]] += 1
+                if list_to_update[k][2] is not self.REMOVED:
+                    self.ranks[list_to_update[k][2]] += 1
 
     def remove_transition(self, transition):
         """
         Mark an existing transition i as REMOVED.  Raise KeyError if not found.
         :param transition: (int) transition i
         """
-        # Update preceeding transitions, since it's a min-heap
+        # Update preceding transitions, since the data structure is a min-heap
         n_transitions = len(self.pq)
         if self.ranks[transition] < n_transitions:
-            for k in range(self.ranks[transition]):
-                if self.pq[k][2] is not self.REMOVED:
-                    self.ranks[self.pq[k][2]] -= 1
+            list_to_update = heapq.nlargest(len(self.pq), self.pq)
+            for k in range(self.ranks[transition], n_transitions):
+                if list_to_update[k][2] is not self.REMOVED:
+                    self.ranks[list_to_update[k][2]] -= 1
         # Removing the transition from data structures (ranking dict & entry-finder)
         del self.ranks[transition]
         entry = self.entry_finder.pop(transition)
@@ -55,16 +66,18 @@ class PriorityQueue(object):
     def pop_transition(self):
         """
         Remove and return the lowest priority transition. Raise KeyError if empty.
+        :returns: (int) transition i with lowesrt priority (inverse of its rank in buffer replay according to td_error)
         """
         while self.pq:
             priority, count, transition = heapq.heappop(self.pq)
             if transition is not self.REMOVED:
-                # Updating the preceeding transitions, since min-heap
+                # Updating the preceding transitions, since the data structure is a min-heap
                 n_transitions = len(self.pq)
                 if self.ranks[transition] < n_transitions:
-                    for k in range(self.ranks[transition]):
-                        if self.pq[k][2] is not self.REMOVED:
-                            self.ranks[self.pq[k][2]] -= 1
+                    list_to_update = heapq.nlargest(len(self.pq), self.pq)
+                    for k in range(self.ranks[transition], n_transitions):
+                        if list_to_update[k][2] is not self.REMOVED:
+                            self.ranks[list_to_update[k][2]] -= 1
                 # Removing from data structures
                 del self.ranks[transition]
                 del self.entry_finder[transition]
@@ -82,24 +95,13 @@ class PriorityQueue(object):
         return [1. / self.ranks.get(t, 10e20) for t in transitions]
 
     def min(self):
-        return 1. / self.ranks[self.pq[0][2]]
+        """
+        :return: (float) minimal priority value for all transitions
+        """
+        return 1. / np.max(list(self.ranks.values()))
 
     def sum(self):
-        return np.sum(1./v for v in list(self.ranks.values()))
-
-
-"""
-if __name__ == "__main__":
-    pq_ = PriorityQueue()
-    pq_.add_transition("first", 3)
-    pq_.add_transition("second", 111)
-    pq_.add_transition("third", 0.1)
-    #print(heapq.nlargest(len(pq_.pq), pq_.pq))
-    print("pq: ", pq_.pq,", priorities: ", pq_.get_priorities(["third", "second", "first"]), ", sum: ",pq_.sum())
-    print(["third", "second", "first"])
-
-    pq_.remove_transition("second")
-    print("pq: ", pq_.pq, ", priorities: ", pq_.get_priorities(["third", "second", "first"]), ", sum: ",
-          pq_.sum())
-    print(["third", "second", "first"])
-"""
+        """
+        :return: (float) sum of all Transitions' priorities
+        """
+        return np.sum(1. / v for v in list(self.ranks.values()))

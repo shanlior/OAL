@@ -167,7 +167,7 @@ class DQN(OffPolicyRLModel):
                 if callback is not None:
                     # Only stop training if return value is False, not when it is None. This is for backwards
                     # compatibility with callbacks that have no return statement.
-                    if callback(locals(), globals()) == False:
+                    if callback(locals(), globals()) is False:
                         break
                 # Take action and update exploration to the newest value
                 kwargs = {}
@@ -240,7 +240,7 @@ class DQN(OffPolicyRLModel):
                         # Using rank based prioritization
                         if self.rank_based_prioritization:
                             # get rank of i when buffer sorted acording td_error(i)
-                            new_priorities = None # set to None because computed internally in update_priorities()
+                            new_priorities = None  # set to None because computed internally in update_priorities()
                             self.replay_buffer.update_rank(batch_idxes, np.abs(td_errors))
                         # Using proportional prioritization
                         else:
