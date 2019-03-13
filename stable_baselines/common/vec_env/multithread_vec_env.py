@@ -1,4 +1,5 @@
-import multiprocessing
+import threading
+from queue import Queue
 from collections import OrderedDict
 
 import gym
@@ -8,119 +9,128 @@ from stable_baselines.common.vec_env import VecEnv, CloudpickleWrapper
 from stable_baselines.common.tile_images import tile_images
 
 
-def _worker(remote, parent_remote, env_fn_wrapper):
-    parent_remote.close()
+def _worker(remote_in, remove_out, env_fn_wrapper):
     env = env_fn_wrapper.var()
     while True:
         try:
-            cmd, data = remote.recv()
+            cmd, data = remote_in.get()
             if cmd == 'step':
                 observation, reward, done, info = env.step(data)
                 if done:
                     observation = env.reset()
-                remote.send((observation, reward, done, info))
+                remove_out.put((observation, reward, done, info))
             elif cmd == 'reset':
                 observation = env.reset()
-                remote.send(observation)
+                remove_out.put(observation)
             elif cmd == 'render':
-                remote.send(env.render(*data[0], **data[1]))
+                remove_out.put(env.render(*data[0], **data[1]))
             elif cmd == 'close':
-                remote.close()
+                env.close()
+                remote_in.task_done()
                 break
             elif cmd == 'get_spaces':
-                remote.send((env.observation_space, env.action_space))
+                remove_out.put((env.observation_space, env.action_space))
             elif cmd == 'env_method':
                 method = getattr(env, data[0])
-                remote.send(method(*data[1], **data[2]))
+                remove_out.put(method(*data[1], **data[2]))
             elif cmd == 'get_attr':
-                remote.send(getattr(env, data))
+                remove_out.put(getattr(env, data))
             elif cmd == 'set_attr':
-                remote.send(setattr(env, data[0], data[1]))
+                remove_out.put(setattr(env, data[0], data[1]))
             else:
+                remote_in.task_done()
                 raise NotImplementedError
+            remote_in.task_done()
         except EOFError:
             break
+        except Exception as e:
+            remove_out.put(e)
 
 
-class SubprocVecEnv(VecEnv):
+def queue_get(remote):
+    ret = remote.get()
+    if isinstance(ret, Exception):
+        raise ret
+    remote.task_done()
+    return ret
+
+
+class MultithreadVecEnv(VecEnv):
     """
-    Creates a multiprocess vectorized wrapper for multiple environments
+    Creates a multithreaded vectorized wrapper for multiple environments
 
-    :param env_fns: ([Gym Environment]) Environments to run in subprocesses
-    :param start_method: (str) method used to start the subprocesses.
-           Must be one of the methods returned by multiprocessing.get_all_start_methods().
-           Defaults to 'forkserver' on available platforms, and 'spawn' otherwise.
-           Both 'forkserver' and 'spawn' are thread-safe, which is important when TensorFlow
-           sessions or other non thread-safe libraries are used in the parent (see issue #217).
-           However, compared to 'fork' they incur a small start-up cost and have restrictions on
-           global variables. For more information, see the multiprocessing documentation.
+    :param env_fns: ([Gym Environment]) Environments to run in multiple threads
     """
 
-    def __init__(self, env_fns, start_method=None):
+    def __init__(self, env_fns):
         self.waiting = False
         self.closed = False
-        n_envs = len(env_fns)
+        n_envs = len(env_fns) - 1
 
-        if start_method is None:
-            # Use thread safe method, see issue #217.
-            # forkserver faster than spawn but not always available.
-            forkserver_available = 'forkserver' in multiprocessing.get_all_start_methods()
-            start_method = 'forkserver' if forkserver_available else 'spawn'
-        ctx = multiprocessing.get_context(start_method)
+        self.local_env = env_fns[0]()
 
-        self.remotes, self.work_remotes = zip(*[ctx.Pipe() for _ in range(n_envs)])
-        self.processes = []
-        for work_remote, remote, env_fn in zip(self.work_remotes, self.remotes, env_fns):
-            args = (work_remote, remote, CloudpickleWrapper(env_fn))
+        self.remote_send = [Queue() for _ in range(n_envs)]
+        self.remote_recv = [Queue() for _ in range(n_envs)]
+        self.threads = []
+        for remote_send, remote_recv, env_fn in zip(self.remote_send, self.remote_recv, env_fns[1:]):
+            args = (remote_send, remote_recv, CloudpickleWrapper(env_fn))
             # daemon=True: if the main process crashes, we should not cause things to hang
-            process = ctx.Process(target=_worker, args=args, daemon=True)
-            process.start()
-            self.processes.append(process)
-            work_remote.close()
+            thread = threading.Thread(target=_worker, args=args, daemon=True)
+            thread.start()
+            self.threads.append(thread)
 
-        self.remotes[0].send(('get_spaces', None))
-        observation_space, action_space = self.remotes[0].recv()
-        VecEnv.__init__(self, len(env_fns), observation_space, action_space)
+        self.local_step_ret = None
+        VecEnv.__init__(self, len(env_fns), self.local_env.observation_space, self.local_env.action_space)
 
     def step_async(self, actions):
-        for remote, action in zip(self.remotes, actions):
-            remote.send(('step', action))
+        for remote, action in zip(self.remote_send, actions[1:]):
+            remote.put(('step', action))
         self.waiting = True
+        self.local_step_ret = self.local_env.step(actions[0])
 
     def step_wait(self):
-        results = [remote.recv() for remote in self.remotes]
+        results = [self.local_step_ret] + [queue_get(remote) for remote in self.remote_recv]
         self.waiting = False
+        if results[0][2]:
+            results[0] = (self.local_env.reset(),) + results[0][1:]
         obs, rews, dones, infos = zip(*results)
         return _flatten_obs(obs, self.observation_space), np.stack(rews), np.stack(dones), infos
 
     def reset(self):
-        for remote in self.remotes:
-            remote.send(('reset', None))
-        obs = [remote.recv() for remote in self.remotes]
+        for remote in self.remote_send:
+            remote.put(('reset', None))
+        obs = [self.local_env.reset()] + [queue_get(remote) for remote in self.remote_recv]
         return _flatten_obs(obs, self.observation_space)
 
     def close(self):
         if self.closed:
             return
-        if self.waiting:
-            for remote in self.remotes:
-                try:
-                    remote.recv()
-                except EOFError:  # in case the join is external and needs to close
-                    pass
-        for remote in self.remotes:
-            remote.send(('close', None))
-        for process in self.processes:
+        for remote in self.remote_recv:
+            while not remote.empty():
+                queue_get(remote)
+        for remote in self.remote_send:
+            remote.put(('close', None))
+        self.local_env.close()
+        for process in self.threads:
             process.join()
+        for remote in self.remote_send:
+            while not remote.empty():
+                queue_get(remote)
+            remote.join()
+        for remote in self.remote_recv:
+            while not remote.empty():
+                queue_get(remote)
+            remote.join()
         self.closed = True
 
     def render(self, mode='human', *args, **kwargs):
-        for pipe in self.remotes:
-            # gather images from subprocesses
+        for remote in self.remote_send:
+            # gather images from threads
             # `mode` will be taken into account later
-            pipe.send(('render', (args, {'mode': 'rgb_array', **kwargs})))
-        imgs = [pipe.recv() for pipe in self.remotes]
-        # Create a big image by tiling images from subprocesses
+            remote.put(('render', (args, {'mode': 'rgb_array', **kwargs})))
+        imgs = [self.local_env.render(*args, **{'mode': 'rgb_array', **kwargs})] + \
+               [queue_get(remote) for remote in self.remote_recv]
+        # Create a big image by tiling images from threads
         bigimg = tile_images(imgs)
         if mode == 'human':
             import cv2
@@ -132,9 +142,9 @@ class SubprocVecEnv(VecEnv):
             raise NotImplementedError
 
     def get_images(self):
-        for pipe in self.remotes:
-            pipe.send(('render', {"mode": 'rgb_array'}))
-        imgs = [pipe.recv() for pipe in self.remotes]
+        for remote in self.remote_send:
+            remote.put(('render', {"mode": 'rgb_array'}))
+        imgs = [self.local_env.render(mode='rgb_array')] + [queue_get(remote) for remote in self.remote_recv]
         return imgs
 
     def env_method(self, method_name, *method_args, **method_kwargs):
@@ -147,9 +157,10 @@ class SubprocVecEnv(VecEnv):
         :return: (list) List of items retured by each environment's method call
         """
 
-        for remote in self.remotes:
-            remote.send(('env_method', (method_name, method_args, method_kwargs)))
-        return [remote.recv() for remote in self.remotes]
+        for remote in self.remote_send:
+            remote.put(('env_method', (method_name, method_args, method_kwargs)))
+        return [getattr(self.local_env, method_name)(*method_args, **method_kwargs)] + \
+               [queue_get(remote) for remote in self.remote_recv]
 
     def get_attr(self, attr_name):
         """
@@ -160,9 +171,10 @@ class SubprocVecEnv(VecEnv):
         :return: (list) List of values of 'attr_name' in all environments
         """
 
-        for remote in self.remotes:
-            remote.send(('get_attr', attr_name))
-        return [remote.recv() for remote in self.remotes]
+        for remote in self.remote_send:
+            remote.put(('get_attr', attr_name))
+        return [getattr(self.local_env, attr_name)] + \
+               [queue_get(remote) for remote in self.remote_recv]
 
     def set_attr(self, attr_name, value, indices=None):
         """
@@ -177,12 +189,13 @@ class SubprocVecEnv(VecEnv):
         """
 
         if indices is None:
-            indices = range(len(self.remotes))
+            indices = range(len(self.remote_send))
         elif isinstance(indices, int):
             indices = [indices]
-        for remote in [self.remotes[i] for i in indices]:
-            remote.send(('set_attr', (attr_name, value)))
-        return [remote.recv() for remote in [self.remotes[i] for i in indices]]
+        for remote in [self.remote_send[i] for i in indices]:
+            remote.put(('set_attr', (attr_name, value)))
+        return [setattr(self.local_env, attr_name, value)] + \
+               [queue_get(remote) for remote in [self.remote_recv[i] for i in indices]]
 
 
 def _flatten_obs(obs, space):
