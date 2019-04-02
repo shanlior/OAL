@@ -270,6 +270,12 @@ class DDPG(OffPolicyRLModel):
         if _init_setup_model:
             self.setup_model()
 
+    def _get_pretrain_placeholders(self):
+        policy = self.policy_tf
+        # Rescale
+        deterministic_action = self.actor_tf * np.abs(self.action_space.low)
+        return policy.obs_ph, self.actions, deterministic_action
+
     def setup_model(self):
         with SetVerbosity(self.verbose):
 
@@ -394,6 +400,10 @@ class DDPG(OffPolicyRLModel):
 
                 self.params = find_trainable_variables("model")
                 self.target_params = find_trainable_variables("target")
+                self.obs_rms_params = [var for var in tf.global_variables()
+                                           if "obs_rms" in var.name]
+                self.ret_rms_params = [var for var in tf.global_variables()
+                                           if "ret_rms" in var.name]
 
                 with self.sess.as_default():
                     self._initialize(self.sess)
@@ -915,9 +925,9 @@ class DDPG(OffPolicyRLModel):
                     combined_stats['rollout/actions_std'] = np.std(epoch_actions)
                     # Evaluation statistics.
                     if self.eval_env is not None:
-                        combined_stats['eval/return'] = eval_episode_rewards
+                        combined_stats['eval/return'] = np.mean(eval_episode_rewards)
                         combined_stats['eval/return_history'] = np.mean(eval_episode_rewards_history)
-                        combined_stats['eval/Q'] = eval_qs
+                        combined_stats['eval/Q'] = np.mean(eval_qs)
                         combined_stats['eval/episodes'] = len(eval_episode_rewards)
 
                     def as_scalar(scalar):
@@ -1016,8 +1026,17 @@ class DDPG(OffPolicyRLModel):
         data = self.get_save_data()
         params = self.sess.run(self.params)
         target_params = self.sess.run(self.target_params)
+        norm_obs_params = self.sess.run(self.obs_rms_params)
+        norm_ret_params = self.sess.run(self.ret_rms_params)
 
-        self._save_to_file(save_path, data=data, params=params + target_params)
+        params_to_save = params \
+            + target_params \
+            + norm_obs_params \
+            + norm_ret_params
+        self._save_to_file(save_path,
+                           data=data,
+                           params=params_to_save)
+
 
     @classmethod
     def load(cls, load_path, env=None, **kwargs):
@@ -1035,7 +1054,11 @@ class DDPG(OffPolicyRLModel):
         model.setup_model()
 
         restores = []
-        for param, loaded_p in zip(model.params + model.target_params, params):
+        params_to_load = model.params \
+            + model.target_params \
+            + model.obs_rms_params \
+            + model.ret_rms_params
+        for param, loaded_p in zip(params_to_load, params):
             restores.append(param.assign(loaded_p))
         model.sess.run(restores)
 

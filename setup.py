@@ -20,9 +20,12 @@ except ImportError:
     install_tf = True
     # Check if a nvidia gpu is present
     for command in ['nvidia-smi', '/usr/bin/nvidia-smi', 'nvidia-smi.exe']:
-        if subprocess.call([command]) == 0:
-            tf_gpu = True
-            break
+        try:
+            if subprocess.call([command]) == 0:
+                tf_gpu = True
+                break
+        except IOError:  # command does not exist / is not executable
+            pass
 
 tf_dependency = []
 if install_tf:
@@ -58,6 +61,9 @@ https://medium.com/@araffin/df87c4b2fc82
 
 Documentation:
 https://stable-baselines.readthedocs.io/en/master/
+
+RL Baselines Zoo:
+https://github.com/araffin/rl-baselines-zoo
 
 ## Quick example
 
@@ -105,7 +111,6 @@ setup(name='stable_baselines',
           'joblib',
           'zmq',
           'dill',
-          'progressbar2',
           'mpi4py',
           'cloudpickle>=0.5.5',
           'click',
@@ -136,7 +141,7 @@ setup(name='stable_baselines',
       license="MIT",
       long_description=long_description,
       long_description_content_type='text/markdown',
-      version="2.4.1a0",
+      version="2.5.1a0",
       )
 
 # python setup.py sdist

@@ -5,8 +5,43 @@ Changelog
 
 For download links, please look at `Github release page <https://github.com/hill-a/stable-baselines/releases>`_.
 
-Pre-Release 2.4.1a (WIP)
+Pre-Release 2.5.1a0 (WIP)
 --------------------------
+
+- doc update (fix example of result plotter + improve doc)
+- fixed logger issues when stdout lacks ``read`` function
+
+
+Release 2.5.0 (2019-03-28)
+--------------------------
+
+**Working GAIL, pretrain RL models and hotfix for A2C with continuous actions**
+
+- fixed various bugs in GAIL
+- added scripts to generate dataset for gail
+- added tests for GAIL + data for Pendulum-v0
+- removed unused ``utils`` file in DQN folder
+- fixed a bug in A2C where actions were cast to ``int32`` even in the continuous case
+- added addional logging to A2C when Monitor wrapper is used
+- changed logging for PPO2: do not display NaN when reward info is not present
+- change default value of A2C lr schedule
+- removed behavior cloning script
+- added ``pretrain`` method to base class, in order to use behavior cloning on all models
+- fixed ``close()`` method for DummyVecEnv.
+- added support for Dict spaces in DummyVecEnv and SubprocVecEnv. (@AdamGleave)
+- added support for arbitrary multiprocessing start methods and added a warning about SubprocVecEnv that are not thread-safe by default.  (@AdamGleave)
+- added support for Discrete actions for GAIL
+- fixed deprecation warning for tf: replaces ``tf.to_float()`` by ``tf.cast()``
+- fixed bug in saving and loading ddpg model when using normalization of obs or returns (@tperol)
+- changed DDPG default buffer size from 100 to 50000.
+- fixed a bug in ``ddpg.py`` in ``combined_stats`` for eval. Computed mean on ``eval_episode_rewards`` and ``eval_qs`` (@keshaviyengar)
+- fixed a bug in ``setup.py`` that would error on non-GPU systems without TensorFlow installed
+
+
+Release 2.4.1 (2019-02-11)
+--------------------------
+
+**Bug fixes and improvements**
 
 - fixed computation of training metrics in TRPO and PPO1
 - added ``reset_num_timesteps`` keyword when calling train() to continue tensorboard learning curves
@@ -17,6 +52,7 @@ Pre-Release 2.4.1a (WIP)
 - fixed custom policy examples in the doc for DQN and DDPG
 - remove gym spaces patch for equality functions
 - fixed tensorflow dependency: cpu version was installed overwritting tensorflow-gpu when present.
+- fixed a bug in ``traj_segment_generator`` (used in ppo1 and trpo) where ``new`` was not updated. (spotted by @junhyeokahn)
 
 
 Release 2.4.0 (2019-01-17)
@@ -215,22 +251,24 @@ Release 0.1.6 (2018-07-27)
 -  Added atari tests
 -  Added logger tests
 
-Missing: tests for acktr continuous (+ HER, gail but they rely on
-mujoco...)
+Missing: tests for acktr continuous (+ HER, rely on mujoco...)
 
 Maintainers
 -----------
 
-Stable-Baselines is currently maintained by `Ashley Hill`_ (aka @hill-a) `Antonin Raffin`_ (aka `@araffin`_) and `Maximilian Ernestus`_ (aka @erniejunior).
+Stable-Baselines is currently maintained by `Ashley Hill`_ (aka @hill-a), `Antonin Raffin`_ (aka `@araffin`_),
+`Maximilian Ernestus`_ (aka @erniejunior) and `Adam Gleave`_ (`@AdamGleave`_).
 
 .. _Ashley Hill: https://github.com/hill-a
 .. _Antonin Raffin: https://araffin.github.io/
 .. _Maximilian Ernestus: https://github.com/erniejunior
+.. _Adam Gleave: https://gleave.me/
 .. _@araffin: https://github.com/araffin
+.. _@AdamGleave: https://github.com/adamgleave
 
 Contributors (since v2.0.0):
 ----------------------------
 In random order...
 
 Thanks to @bjmuld @iambenzo @iandanforth @r7vme @brendenpetersen @huvar @abhiskk @JohannesAck
-@EliasHasle @mrakgr @Bleyddyn @antoine-galataud
+@EliasHasle @mrakgr @Bleyddyn @antoine-galataud @junhyeokahn @AdamGleave @keshaviyengar @tperol

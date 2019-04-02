@@ -44,6 +44,9 @@ class HER(OffPolicyRLModel):
         if _init_setup_model:
             self.setup_model()
 
+    def _get_pretrain_placeholders(self):
+        raise NotImplementedError()
+
     def setup_model(self):
         self.reward_function.set_env(self.env, self.observation_space)
         self.model.setup_model()
