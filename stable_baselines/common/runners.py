@@ -55,7 +55,7 @@ class AbstractEnvRunner(ABC):
         raise NotImplementedError
 
 
-def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, callback=None):
+def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, mdal=False, callback=None):
     """
     Compute target value using TD(lambda) estimator, and advantage with GAE(lambda)
     :param policy: (MLPPolicy) the policy
@@ -107,6 +107,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
     states = policy.initial_state
     episode_start = True  # marks if we're on first timestep of an episode
     done = False
+    # covariance_lambda = np.identity(env.observation_space.shape[0])
 
     callback.on_rollout_start()
 
@@ -118,7 +119,25 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
         if step > 0 and step % horizon == 0:
             callback.update_locals(locals())
             callback.on_rollout_end()
-            yield {
+            if mdal:
+                yield {
+                        "observations": observations,
+                        "rewards": rewards,
+                        "dones": dones,
+                        "episode_starts": episode_starts,
+                        "true_rewards": true_rewards,
+                        "vpred": vpreds,
+                        "actions": actions,
+                        "nextvpred": vpred[0] * (1 - episode_start),
+                        # "nextvpred": vpred[0],
+                        "ep_rets": ep_rets,
+                        "ep_lens": ep_lens,
+                        "ep_true_rets": ep_true_rets,
+                        "total_timestep": current_it_len,
+                        'continue_training': True,
+                }
+            else:
+                yield {
                     "observations": observations,
                     "rewards": rewards,
                     "dones": dones,
@@ -132,7 +151,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
                     "ep_true_rets": ep_true_rets,
                     "total_timestep": current_it_len,
                     'continue_training': True
-            }
+                }
             _, vpred, _, _ = policy.step(observation.reshape(-1, *observation.shape))
             # Be careful!!! if you change the downstream algorithm to aggregate
             # several of these batches, then be sure to do a deepcopy
@@ -156,6 +175,13 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
         if gail:
             reward = reward_giver.get_reward(observation, clipped_action[0])
             observation, true_reward, done, info = env.step(clipped_action[0])
+        elif mdal:
+            # reward = reward_giver.get_reward(observation, (step+1) * covariance_lambda)
+            # covariance_lambda = (step+1) / (step + 2) * covariance_lambda \
+            #                     + np.matmul(np.expand_dims(observation, axis=1), np.expand_dims(observation, axis=0))\
+            #                     / (step + 2)
+            reward = reward_giver.get_reward(observation)
+            observation, true_reward, done, info = env.step(clipped_action[0])
         else:
             observation, reward, done, info = env.step(clipped_action[0])
             true_reward = reward
@@ -164,20 +190,37 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
             callback.update_locals(locals())
             if callback.on_step() is False:
                 # We have to return everything so pytype does not complain
-                yield {
-                    "observations": observations,
-                    "rewards": rewards,
-                    "dones": dones,
-                    "episode_starts": episode_starts,
-                    "true_rewards": true_rewards,
-                    "vpred": vpreds,
-                    "actions": actions,
-                    "nextvpred": vpred[0] * (1 - episode_start),
-                    "ep_rets": ep_rets,
-                    "ep_lens": ep_lens,
-                    "ep_true_rets": ep_true_rets,
-                    "total_timestep": current_it_len,
-                    'continue_training': False
+                if mdal:
+                    yield {
+                        "observations": observations,
+                        "rewards": rewards,
+                        "dones": dones,
+                        "episode_starts": episode_starts,
+                        "true_rewards": true_rewards,
+                        "vpred": vpreds,
+                        "actions": actions,
+                        "nextvpred": vpred[0] * (1 - episode_start),
+                        "ep_rets": ep_rets,
+                        "ep_lens": ep_lens,
+                        "ep_true_rets": ep_true_rets,
+                        "total_timestep": current_it_len,
+                        'continue_training': False,
+                    }
+                else:
+                    yield {
+                        "observations": observations,
+                        "rewards": rewards,
+                        "dones": dones,
+                        "episode_starts": episode_starts,
+                        "true_rewards": true_rewards,
+                        "vpred": vpreds,
+                        "actions": actions,
+                        "nextvpred": vpred[0] * (1 - episode_start),
+                        "ep_rets": ep_rets,
+                        "ep_lens": ep_lens,
+                        "ep_true_rets": ep_true_rets,
+                        "total_timestep": current_it_len,
+                        'continue_training': False,
                     }
                 return
 

@@ -188,6 +188,17 @@ def mujoco_arg_parser():
     parser.add_argument('--seed', help='RNG seed', type=int, default=0)
     parser.add_argument('--num-timesteps', type=int, default=int(1e6))
     parser.add_argument('--play', default=False, action='store_true')
+    parser.add_argument('--t-pi', type=float, default=float(0.5))
+    parser.add_argument('--t-c', type=float, default=float(0.05))
+    parser.add_argument('--no-log', help='Not logging', default=False, action='store_true')
+    parser.add_argument('--sgd-steps', type=int, default=int(10))
+    parser.add_argument('--algo', help='Algorithm ID', type=str, default='MDAL')
+    parser.add_argument('--expert-path', help='Expert path', type=str, default='')
+
+
+
+
+
     return parser
 
 

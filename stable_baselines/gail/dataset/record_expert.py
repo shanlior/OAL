@@ -33,7 +33,6 @@ def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
     :param image_folder: (str) When using images, folder that will be used to record images.
     :return: (dict) the generated expert trajectories.
     """
-
     # Retrieve the environment using the RL model
     if env is None and isinstance(model, BaseRLModel):
         env = model.get_env()
@@ -90,10 +89,13 @@ def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
     observations = []
     rewards = []
     episode_returns = np.zeros((n_episodes,))
+
     episode_starts = []
 
     ep_idx = 0
     obs = env.reset()
+    episode_obs = []
+    episode_obs.append([])
     episode_starts.append(True)
     reward_sum = 0.0
     idx = 0
@@ -115,6 +117,7 @@ def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
             observations.append(image_path)
         else:
             observations.append(obs_)
+            episode_obs[ep_idx].append(obs_)
 
         if isinstance(model, BaseRLModel):
             action, state = model.predict(obs, state=state, mask=mask)
@@ -140,10 +143,12 @@ def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
                 obs = env.reset()
                 # Reset the state in case of a recurrent policy
                 state = None
-
             episode_returns[ep_idx] = reward_sum
             reward_sum = 0.0
             ep_idx += 1
+            if ep_idx < n_episodes:
+                episode_obs.append([])
+
 
     if isinstance(env.observation_space, spaces.Box) and not record_images:
         observations = np.concatenate(observations).reshape((-1,) + env.observation_space.shape)
@@ -157,6 +162,22 @@ def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
     elif isinstance(env.action_space, spaces.Discrete):
         actions = np.array(actions).reshape((-1, 1))
 
+    gamma = model.gamma
+
+
+    for ep_idx, ep_obs in enumerate(episode_obs):
+        for idx, obs in enumerate(reversed(ep_obs)):
+            if idx == 0:
+                successor_features = (1-gamma) * obs
+            else:
+                successor_features = np.add( gamma * successor_features, (1 - gamma) * obs)
+        if ep_idx == 0:
+            sum_successor_features = successor_features
+        else:
+            sum_successor_features = np.add(sum_successor_features, successor_features)
+
+    successor_features = sum_successor_features / n_episodes
+
     rewards = np.array(rewards)
     episode_starts = np.array(episode_starts[:-1])
 
@@ -167,9 +188,9 @@ def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
         'obs': observations,
         'rewards': rewards,
         'episode_returns': episode_returns,
-        'episode_starts': episode_starts
+        'episode_starts': episode_starts,
+        'successor_features': successor_features
     }  # type: Dict[str, np.ndarray]
-
     for key, val in numpy_dict.items():
         print(key, val.shape)
 

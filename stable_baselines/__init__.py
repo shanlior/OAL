@@ -8,6 +8,9 @@ from stable_baselines.her import HER
 from stable_baselines.ppo2 import PPO2
 from stable_baselines.td3 import TD3
 from stable_baselines.sac import SAC
+from stable_baselines.mdpo import MDPO_OFF
+from stable_baselines.mdal import MDAL_MDPO_OFF
+
 
 # Load mpi4py-dependent algorithms only if mpi is installed.
 try:

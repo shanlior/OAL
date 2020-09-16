@@ -69,7 +69,7 @@ class BaseRLModel(ABC):
                 if self.verbose >= 1:
                     print("Creating environment from the given name, wrapped in a DummyVecEnv.")
                 self.env = env = DummyVecEnv([lambda: gym.make(env)])
-
+                # env.seed = self.seed
             self.observation_space = env.observation_space
             self.action_space = env.action_space
             if requires_vec_env:
@@ -1001,7 +1001,8 @@ class OffPolicyRLModel(BaseRLModel):
         :param info: (dict) extra values used to compute the reward when using HER
         """
         # Pass info dict when using HER, as it can be used to compute the reward
-        kwargs = dict(info=info) if self.is_using_her() else {}
+        # kwargs = dict(info=info) if self.is_using_her() else {}
+        kwargs = dict(info=info)
         self.replay_buffer.add(obs_t, action, reward, obs_tp1, float(done), **kwargs)
 
     @abstractmethod

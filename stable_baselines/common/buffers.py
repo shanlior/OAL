@@ -8,7 +8,7 @@ from stable_baselines.common.vec_env import VecNormalize
 
 
 class ReplayBuffer(object):
-    def __init__(self, size: int):
+    def __init__(self, size: int, info=False):
         """
         Implements a ring buffer (FIFO).
 
@@ -18,6 +18,7 @@ class ReplayBuffer(object):
         self._storage = []
         self._maxsize = size
         self._next_idx = 0
+        self._info = info
 
     def __len__(self) -> int:
         return len(self._storage)
@@ -50,7 +51,7 @@ class ReplayBuffer(object):
         """
         return len(self) == self.buffer_size
 
-    def add(self, obs_t, action, reward, obs_tp1, done):
+    def add(self, obs_t, action, reward, obs_tp1, done, info=None):
         """
         add a new transition to the buffer
 
@@ -60,7 +61,16 @@ class ReplayBuffer(object):
         :param obs_tp1: (Union[np.ndarray, int]) the current observation
         :param done: (bool) is the episode done
         """
-        data = (obs_t, action, reward, obs_tp1, done)
+        if self._info:
+            truncated = info.get('TimeLimit.truncated')
+            if truncated is not None:
+                terminal = not truncated
+            else:
+                terminal = done
+
+            data = (obs_t, action, reward, obs_tp1, done, terminal)
+        else:
+            data = (obs_t, action, reward, obs_tp1, done)
 
         if self._next_idx >= len(self._storage):
             self._storage.append(data)
@@ -68,7 +78,7 @@ class ReplayBuffer(object):
             self._storage[self._next_idx] = data
         self._next_idx = (self._next_idx + 1) % self._maxsize
 
-    def extend(self, obs_t, action, reward, obs_tp1, done):
+    def extend(self, obs_t, action, reward, obs_tp1, done, terminal=None):
         """
         add a new batch of transitions to the buffer
 
@@ -81,12 +91,20 @@ class ReplayBuffer(object):
         Note: uses the same names as .add to keep compatibility with named argument passing
                 but expects iterables and arrays with more than 1 dimensions
         """
-        for data in zip(obs_t, action, reward, obs_tp1, done):
-            if self._next_idx >= len(self._storage):
-                self._storage.append(data)
-            else:
-                self._storage[self._next_idx] = data
-            self._next_idx = (self._next_idx + 1) % self._maxsize
+        if self._info:
+            for data in zip(obs_t, action, reward, obs_tp1, done, terminal):
+                if self._next_idx >= len(self._storage):
+                    self._storage.append(data)
+                else:
+                    self._storage[self._next_idx] = data
+                self._next_idx = (self._next_idx + 1) % self._maxsize
+        else:
+            for data in zip(obs_t, action, reward, obs_tp1, done):
+                if self._next_idx >= len(self._storage):
+                    self._storage.append(data)
+                else:
+                    self._storage[self._next_idx] = data
+                self._next_idx = (self._next_idx + 1) % self._maxsize
 
     @staticmethod
     def _normalize_obs(obs: np.ndarray,
@@ -109,20 +127,32 @@ class ReplayBuffer(object):
         return reward
 
     def _encode_sample(self, idxes: Union[List[int], np.ndarray], env: Optional[VecNormalize] = None):
-        obses_t, actions, rewards, obses_tp1, dones = [], [], [], [], []
+        obses_t, actions, rewards, obses_tp1, dones, terminals = [], [], [], [], [], []
         for i in idxes:
             data = self._storage[i]
-            obs_t, action, reward, obs_tp1, done = data
+            if self._info:
+                obs_t, action, reward, obs_tp1, done, terminal = data
+                terminals.append(terminal)
+            else:
+                obs_t, action, reward, obs_tp1, done = data
             obses_t.append(np.array(obs_t, copy=False))
             actions.append(np.array(action, copy=False))
             rewards.append(reward)
             obses_tp1.append(np.array(obs_tp1, copy=False))
             dones.append(done)
-        return (self._normalize_obs(np.array(obses_t), env),
-                np.array(actions),
-                self._normalize_reward(np.array(rewards), env),
-                self._normalize_obs(np.array(obses_tp1), env),
-                np.array(dones))
+        if self._info:
+            return (self._normalize_obs(np.array(obses_t), env),
+                    np.array(actions),
+                    self._normalize_reward(np.array(rewards), env),
+                    self._normalize_obs(np.array(obses_tp1), env),
+                    np.array(dones),
+                    np.array(terminals))
+        else:
+            return (self._normalize_obs(np.array(obses_t), env),
+                    np.array(actions),
+                    self._normalize_reward(np.array(rewards), env),
+                    self._normalize_obs(np.array(obses_tp1), env),
+                    np.array(dones))
 
     def sample(self, batch_size: int, env: Optional[VecNormalize] = None, **_kwargs):
         """
