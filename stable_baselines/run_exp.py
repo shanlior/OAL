@@ -25,7 +25,8 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
     with tf_util.single_threaded_session():
         from mpi4py import MPI
         rank = MPI.COMM_WORLD.Get_rank()
-        log_path = './experiments/' + str(env_id) + './' + str(algo) + '/gradSteps' + str(sgd_steps) + '_tpi' + str(
+        env_name = env_id[:-3].lower()
+        log_path = './experiments/' + env_name + '/' + str(algo).lower() + '/gradSteps' + str(sgd_steps) + '_tpi' + str(
             t_pi) + '_tc' + str(t_c) + '_s' + str(seed)
         expert_path = './experts/' + expert_path + '.npz'
         if not log:
@@ -56,7 +57,6 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
 
         dataset = ExpertDataset(expert_path=expert_path, traj_limitation=10, verbose=1)
 
-        env_name = env_id[:-3].lower()
 
         if algo == 'MDAL':
             model = MDAL_MDPO_OFF('MlpPolicy', env_id, dataset, verbose=1,
