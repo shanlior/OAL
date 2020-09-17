@@ -56,9 +56,11 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
 
         dataset = ExpertDataset(expert_path=expert_path, traj_limitation=10, verbose=1)
 
+        env_name = env_id[:-3].lower()
+
         if algo == 'MDAL':
             model = MDAL_MDPO_OFF('MlpPolicy', env_id, dataset, verbose=1,
-                                  tensorboard_log="./experiments/humanoid/mdal_mdpo_off_tensorboard/", seed=seed,
+                                  tensorboard_log="./experiments/" + env_name + "/mdal/", seed=seed,
                                   buffer_size=1000000, ent_coef=1.0, learning_starts=10000, batch_size=256, tau=0.01,
                                   gamma=0.99, gradient_steps=sgd_steps, lam=0.0, train_freq=1, tsallis_q=1,
                                   reparameterize=True, t_pi=t_pi, t_c=t_c)
@@ -67,8 +69,8 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
             from stable_baselines import GAIL
 
             model = GAIL('MlpPolicy', env_id, dataset, verbose=1,
-                         tensorboard_log="./experiments/cheetah/gail_tensorboard/",
-                         entcoeff=0.01, adversary_entcoeff=0.0)
+                         tensorboard_log="./experiments/" + env_name + "/gail/",
+                         entcoeff=0.0, adversary_entcoeff=0.001)
 
         else:
             raise ValueError("Not a valid algorithm.")
