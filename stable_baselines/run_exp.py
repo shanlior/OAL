@@ -29,7 +29,7 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
         log_path = './experiments/' + env_name + '/' + str(algo).lower() + '/gradSteps' + str(sgd_steps) + '_tpi' + str(
             t_pi) + '_tc' + str(t_c) + '_s' + str(seed)
         expert_path = './experts/' + expert_path + '.npz'
-        if not log:
+        if log:
             if rank == 0:
                 logger.configure(log_path)
             else:
