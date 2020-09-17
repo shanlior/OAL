@@ -113,7 +113,8 @@ class TRPO(ActorCriticRLModel):
 
     def setup_model(self):
         # prevent import loops
-        from stable_baselines.gail.adversary import TransitionClassifier, TabularAdversary
+        from stable_baselines.gail.adversary import TransitionClassifier
+        from stable_baselines.mdal.adversary import TabularAdversary
 
         with SetVerbosity(self.verbose):
 
