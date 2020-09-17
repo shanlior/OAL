@@ -11,7 +11,7 @@ from stable_baselines.common.cmd_util import make_mujoco_env, mujoco_arg_parser
 from stable_baselines import bench, logger
 from stable_baselines.mdal import MDAL_MDPO_OFF
 from stable_baselines.gail import ExpertDataset, generate_expert_traj
-
+import os
 
 
 def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_path):
@@ -84,6 +84,9 @@ def main():
     Runs the test
     """
     args = mujoco_arg_parser().parse_args()
+    os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
+    os.environ['OMP_NUM_THREADS'] = '4'
+    os.environ['OPENBLAS_NUM_THREADS'] = '4'
     log = not args.no_log
     train(args.env, algo=args.algo, num_timesteps=args.num_timesteps, seed=args.seed, sgd_steps=args.sgd_steps,
           t_pi=args.t_pi, t_c=args.t_c, log=log, expert_path=args.expert_path)
