@@ -27,6 +27,7 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
         rank = MPI.COMM_WORLD.Get_rank()
         log_path = './experiments/' + str(env_id) + './' + str(algo) + '/gradSteps' + str(sgd_steps) + '_tpi' + str(
             t_pi) + '_tc' + str(t_c) + '_s' + str(seed)
+        expert_path = './expert/' + expert_path + '.npz'
         if not log:
             if rank == 0:
                 logger.configure(log_path)
@@ -53,7 +54,7 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
         env = VecNormalize(env, norm_reward=False, norm_obs=False)
         # env = VecNormalize(env)
 
-        dataset = ExpertDataset(expert_path=expert_path + '.npz', traj_limitation=10, verbose=1)
+        dataset = ExpertDataset(expert_path=expert_path, traj_limitation=10, verbose=1)
 
         if algo == 'MDAL':
             model = MDAL_MDPO_OFF('MlpPolicy', env_id, dataset, verbose=1,
