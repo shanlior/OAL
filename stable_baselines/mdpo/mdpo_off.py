@@ -165,7 +165,7 @@ class MDPO_OFF(OffPolicyRLModel):
     def setup_model(self):
 
         # prevent import loops
-        from stable_baselines.mdal.adversary import TabularAdversary
+        from stable_baselines.mdal.adversary import TabularAdversary, TabularAdversaryTF
 
         with SetVerbosity(self.verbose):
             self.graph = tf.Graph()
@@ -175,7 +175,7 @@ class MDPO_OFF(OffPolicyRLModel):
                 self.sess = tf_util.single_threaded_session(graph=self.graph)
 
                 if self.using_mdal:
-                    self.reward_giver = TabularAdversary(self.observation_space, self.action_space,
+                    self.reward_giver = TabularAdversaryTF(self.sess, self.observation_space, self.action_space,
                                                              self.hidden_size_adversary,
                                                              entcoeff=self.adversary_entcoeff,
                                                              expert_features=self.expert_dataset.successor_features,

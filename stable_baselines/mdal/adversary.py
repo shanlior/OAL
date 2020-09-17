@@ -30,7 +30,7 @@ def logit_bernoulli_entropy(logits):
 
 class TabularAdversary(object):
     def __init__(self, observation_space, action_space, hidden_size,
-                 entcoeff=0.001, scope="adversary", normalize=True, expert_features=None,
+                 entcoeff=0.00, scope="adversary", normalize=True, expert_features=None,
                  exploration_bonus=False, bonus_coef=0.01, t_c=0.1):
         """
         Reward regression from observations and transitions
@@ -103,3 +103,103 @@ class TabularAdversary(object):
         else:
             reward = np.matmul(observation, np.reshape(self.reward, (self.reward.shape[0], 1))).squeeze()
             return reward
+
+
+
+class TabularAdversaryTF(object):
+    def __init__(self, sess, observation_space, action_space, hidden_size,
+                 entcoeff=0.00, scope="adversary", normalize=True, expert_features=None,
+                 exploration_bonus=False, bonus_coef=0.01, t_c=0.1):
+        """
+        Reward regression from observations and transitions
+
+        :param observation_space: (gym.spaces)
+        :param action_space: (gym.spaces)
+        :param hidden_size: ([int]) the hidden dimension for the MLP
+        :param entcoeff: (float) the entropy loss weight
+        :param scope: (str) tensorflow variable scope
+        :param normalize: (bool) Whether to normalize the reward or not
+        """
+        # TODO: support images properly (using a CNN)
+        self.scope = scope
+        self.sess = sess
+        self.observation_shape = observation_space.shape
+        self.actions_shape = action_space.shape
+
+        if isinstance(action_space, gym.spaces.Box):
+            # Continuous action space
+            self.discrete_actions = False
+            self.n_actions = action_space.shape[0]
+        elif isinstance(action_space, gym.spaces.Discrete):
+            self.n_actions = action_space.n
+            self.discrete_actions = True
+        else:
+            raise ValueError('Action space not supported: {}'.format(action_space))
+
+        self.hidden_size = hidden_size
+        self.normalize = normalize
+        self.obs_rms = None
+        self.expert_features = tf.constant(expert_features, dtype=tf.float32)
+
+        self.norm_factor = tf.sqrt(float(self.observation_shape[0]))
+
+        normalization = np.linalg.norm(expert_features)
+        if normalization > 1:
+            self.reward_vec = tf.Variable(expert_features / (self.norm_factor * normalization))
+        else:
+            self.reward_vec = tf.Variable(expert_features / self.norm_factor)
+
+        self.exploration_bonus = exploration_bonus
+        self.t_c = t_c
+
+        self.bonus_coef = bonus_coef
+        if self.exploration_bonus:
+            self.covariance_lambda = tf.identity(self.observation_shape[0])
+        else:
+            self.covariance_lambda = None
+        # Placeholders
+        self.obs_ph = tf.placeholder(tf.float32, (None,) + self.observation_shape,
+                                               name="observations_ph")
+        self.features_ph = tf.placeholder(tf.float32, (None,) + self.observation_shape,
+                                               name="features_ph")
+        # Build graph
+        with tf.variable_scope(self.scope, reuse=False):
+            self.reward_op = tf.squeeze(tf.matmul(self.obs_ph, tf.expand_dims(self.reward_vec, 1)))
+
+            # Update reward
+            self.new_reward_vec = self.reward_vec\
+                                    + self.t_c * (self.expert_features - self.features_ph) / self.norm_factor
+            self.normalization = tf.norm(self.new_reward_vec)
+            self.new_reward_vec = tf.cond(normalization > 1,
+                                            true_fn=lambda: self.reward_vec / self.normalization,
+                                            false_fn=lambda: self.reward_vec)
+
+            self.update_reward_op = tf.assign(self.reward_vec, self.new_reward_vec)
+
+
+
+    def update_reward(self, features):
+        #
+        # sess = tf.get_default_session()
+        if len(features.shape) == 1:
+            features = np.expand_dims(features, 0)
+
+        feed_dict = {self.features_ph: features}
+        self.sess.run(self.update_reward_op, feed_dict)
+
+
+    def get_reward(self, obs):
+        """
+        Predict the reward using the observation and action
+
+        :param obs: (tf.Tensor or np.ndarray) the observation
+        :param actions: (tf.Tensor or np.ndarray) the action
+        :return: (np.ndarray) the reward
+        """
+        # sess = tf.get_default_session()
+        if len(obs.shape) == 1:
+            obs = np.expand_dims(obs, 0)
+
+        feed_dict = {self.obs_ph: obs}
+        reward = self.sess.run(self.reward_op, feed_dict)
+        return reward

@@ -395,7 +395,7 @@ class TRPO(ActorCriticRLModel):
                         else:
                             with self.timed("conjugate_gradient"):
                                 stepdir = conjugate_gradient(fisher_vector_product, grad, cg_iters=self.cg_iters,
-                                                             verbose=self.rank == 0 and self.verbose >= 1)
+                                                             verbose=self.rank == 0 and self.verbose >= 2)
                             assert np.isfinite(stepdir).all()
                             shs = .5 * stepdir.dot(fisher_vector_product(stepdir))
                             # abs(shs) to avoid taking square root of negative values

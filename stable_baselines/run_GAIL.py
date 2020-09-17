@@ -17,7 +17,7 @@ from stable_baselines.gail import ExpertDataset, generate_expert_traj
 # Load the expert dataset
 #
 # dataset = ExpertDataset(expert_path='expert_cheetah_2e6.npz', traj_limitation=10, verbose=1)
-dataset = ExpertDataset(expert_path='expert_humanoid_10e6.npz', traj_limitation=10, verbose=1)
+dataset = ExpertDataset(expert_path='experts/expert_humanoid_10e6.npz', traj_limitation=10, verbose=1)
 
 # #
 #
