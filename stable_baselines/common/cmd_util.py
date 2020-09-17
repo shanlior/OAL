@@ -193,6 +193,7 @@ def mujoco_arg_parser():
     parser.add_argument('--t-c', type=float, default=float(0.05))
     parser.add_argument('--no-log', help='Not logging', default=False, action='store_true')
     parser.add_argument('--sgd-steps', type=int, default=int(10))
+    parser.add_argument('--mdpo-update-steps', type=int, default=int(10))
     parser.add_argument('--algo', help='Algorithm ID', type=str, default='MDAL')
     parser.add_argument('--expert-path', help='Expert path', type=str, default='')
     parser.add_argument('--pretrain', default=False, action='store_true')

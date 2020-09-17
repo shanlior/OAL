@@ -14,7 +14,8 @@ from stable_baselines.gail import ExpertDataset, generate_expert_traj
 import os
 
 
-def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_path, pretrain, pretrain_epochs):
+def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_path, pretrain, pretrain_epochs,
+          mdpo_update_steps):
     """
     Train TRPO model for the mujoco environment, for testing purposes
     :param env_id: (str) Environment ID
@@ -62,8 +63,8 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
             model = MDAL_MDPO_OFF('MlpPolicy', env_id, dataset, verbose=1,
                                   tensorboard_log="./experiments/" + env_name + "/mdal/", seed=seed,
                                   buffer_size=1000000, ent_coef=1.0, learning_starts=10000, batch_size=256, tau=0.01,
-                                  gamma=0.99, gradient_steps=sgd_steps, lam=0.0, train_freq=1, tsallis_q=1,
-                                  reparameterize=True, t_pi=t_pi, t_c=t_c)
+                                  gamma=0.99, gradient_steps=sgd_steps, mdpo_update_steps=mdpo_update_steps,
+                                  lam=0.0, train_freq=1, tsallis_q=1, reparameterize=True, t_pi=t_pi, t_c=t_c)
         elif algo == 'GAIL':
             from mpi4py import MPI
             from stable_baselines import GAIL
@@ -91,7 +92,7 @@ def main():
     log = not args.no_log
     train(args.env, algo=args.algo, num_timesteps=args.num_timesteps, seed=args.seed, sgd_steps=args.sgd_steps,
           t_pi=args.t_pi, t_c=args.t_c, log=log, expert_path=args.expert_path,
-          pretrain=args.pretrain, pretrain_epochs=args.pretrain_epochs)
+          pretrain=args.pretrain, pretrain_epochs=args.pretrain_epochs, mdpo_update_steps=args.mdpo_update_steps)
 
 
 if __name__ == '__main__':

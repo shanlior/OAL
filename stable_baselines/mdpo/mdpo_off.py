@@ -66,7 +66,7 @@ class MDPO_OFF(OffPolicyRLModel):
                  random_exploration=0.0, verbose=0, tensorboard_log=None,
                  _init_setup_model=True, policy_kwargs=None, full_tensorboard_log=False,
                  seed=None, n_cpu_tf_sess=None, tsallis_q=1, reparameterize=True, t_pi=1.0, t_c=0.01,
-                 timesteps_per_batch=1024
+                 timesteps_per_batch=1024, mdpo_update_steps=1
     ):
 
         super(MDPO_OFF, self).__init__(policy=policy, env=env, replay_buffer=None, verbose=verbose,
@@ -144,6 +144,7 @@ class MDPO_OFF(OffPolicyRLModel):
         self.reparameterize = reparameterize
         self.t_pi = t_pi
         self.t_c = t_c
+        self.mdpo_update_steps = mdpo_update_steps
 
 
         if self.tsallis_q == 1:
@@ -600,7 +601,7 @@ class MDPO_OFF(OffPolicyRLModel):
                     # if len(mb_infos_vals) > 0:
                     #     infos_values = np.mean(mb_infos_vals, axis=0)
 
-                if step % self.gradient_steps == 0:
+                if step % self.mdpo_update_steps == 0:
                     self.sess.run(self.assign_policy_op)
 
                 # Update Rewards

@@ -30,7 +30,7 @@ dataset = ExpertDataset(expert_path='expert_humanoid_10e6.npz', traj_limitation=
 model = MDAL_MDPO_OFF('MlpPolicy', 'Humanoid-v2', dataset, verbose=1,
                       tensorboard_log="./experiments/humanoid/mdal_mdpo_off_tensorboard/", seed=0,
                       buffer_size=1000000, ent_coef=1.0, learning_starts=10000, batch_size=256, tau=0.01,
-                      gradient_steps=10, lam=0.0, train_freq=1, tsallis_q=1, reparameterize=True,
+                      gradient_steps=10, mdpo_gradient_steps=10, lam=0.0, train_freq=1, tsallis_q=1, reparameterize=True,
                       t_pi=0.5, t_c=0.05,
                       n_cpu_tf_sess=4)
 # # model = MDAL('MlpPolicy', 'Humanoid-v2', dataset, exploration_bonus=False,
