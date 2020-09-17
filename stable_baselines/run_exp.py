@@ -14,7 +14,7 @@ from stable_baselines.gail import ExpertDataset, generate_expert_traj
 import os
 
 
-def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_path):
+def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_path, pretrain, pretrain_epochs):
     """
     Train TRPO model for the mujoco environment, for testing purposes
     :param env_id: (str) Environment ID
@@ -74,7 +74,8 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
 
         else:
             raise ValueError("Not a valid algorithm.")
-
+        if pretrain:
+            model.pretrain(dataset, n_epochs=pretrain_epochs)
         model.learn(total_timesteps=int(num_timesteps))
         env.close()
 
@@ -89,7 +90,8 @@ def main():
     os.environ['OPENBLAS_NUM_THREADS'] = '4'
     log = not args.no_log
     train(args.env, algo=args.algo, num_timesteps=args.num_timesteps, seed=args.seed, sgd_steps=args.sgd_steps,
-          t_pi=args.t_pi, t_c=args.t_c, log=log, expert_path=args.expert_path)
+          t_pi=args.t_pi, t_c=args.t_c, log=log, expert_path=args.expert_path,
+          pretrain=args.pretrain, pretrain_epochs=args.pretrain_epochs)
 
 
 if __name__ == '__main__':
