@@ -59,7 +59,7 @@ class SAC(OffPolicyRLModel):
     """
 
     def __init__(self, policy, env, gamma=0.99, learning_rate=3e-4, buffer_size=50000,
-                 learning_starts=100, train_freq=1, batch_size=64,
+                 learning_starts=100, train_freq=1, update_reward_freq=2000, batch_size=64,
                  tau=0.005, ent_coef='auto', target_update_interval=1,
                  gradient_steps=1, target_entropy='auto', action_noise=None,
                  random_exploration=0.0, verbose=0, tensorboard_log=None,
@@ -70,10 +70,13 @@ class SAC(OffPolicyRLModel):
                                   policy_base=SACPolicy, requires_vec_env=False, policy_kwargs=policy_kwargs,
                                   seed=seed, n_cpu_tf_sess=n_cpu_tf_sess)
 
+        self.using_gail = False
+        self.using_mdal = False
         self.buffer_size = buffer_size
         self.learning_rate = learning_rate
         self.learning_starts = learning_starts
         self.train_freq = train_freq
+        self.update_reward_freq = update_reward_freq
         self.batch_size = batch_size
         self.tau = tau
         # In the original paper, same learning rate is used for all networks
@@ -100,6 +103,14 @@ class SAC(OffPolicyRLModel):
         self.policy_tf = None
         self.target_entropy = target_entropy
         self.full_tensorboard_log = full_tensorboard_log
+
+        # GAIL Params
+        self.hidden_size_adversary = 100
+        self.adversary_entcoeff = 1e-3
+        self.expert_dataset = None
+        self.g_step = 1
+        self.d_step = 1
+        self.d_stepsize = 3e-4
 
         self.obs_target = None
         self.target_policy = None
@@ -130,11 +141,23 @@ class SAC(OffPolicyRLModel):
         return policy.obs_ph, self.actions_ph, deterministic_action
 
     def setup_model(self):
+
+        # prevent import loops
+        from stable_baselines.gail.adversary import TransitionClassifier, TabularAdversary
+
         with SetVerbosity(self.verbose):
             self.graph = tf.Graph()
             with self.graph.as_default():
                 self.set_random_seed(self.seed)
                 self.sess = tf_util.make_session(num_cpu=self.n_cpu_tf_sess, graph=self.graph)
+
+                if self.using_mdal:
+                    self.reward_giver = TabularAdversary(self.observation_space, self.action_space,
+                                                             self.hidden_size_adversary,
+                                                             entcoeff=self.adversary_entcoeff,
+                                                             expert_features=self.expert_dataset.successor_features,
+                                                             exploration_bonus=self.exploration_bonus,
+                                                             bonus_coef=self.bonus_coef)
 
                 self.replay_buffer = ReplayBuffer(self.buffer_size)
 
@@ -318,6 +341,9 @@ class SAC(OffPolicyRLModel):
         batch = self.replay_buffer.sample(self.batch_size, env=self._vec_normalize_env)
         batch_obs, batch_actions, batch_rewards, batch_next_obs, batch_dones = batch
 
+        if self.using_mdal:
+            batch_rewards = self.reward_giver.get_reward(batch_obs)
+
         feed_dict = {
             self.observations_ph: batch_obs,
             self.actions_ph: batch_actions,
@@ -339,6 +365,7 @@ class SAC(OffPolicyRLModel):
             writer.add_summary(summary, step)
         else:
             out = self.sess.run(self.step_ops, feed_dict)
+        # out = self.sess.run(self.step_ops, feed_dict)
 
         # Unpack to monitor losses and entropy
         policy_loss, qf1_loss, qf2_loss, value_loss, *values = out
@@ -350,6 +377,7 @@ class SAC(OffPolicyRLModel):
             return policy_loss, qf1_loss, qf2_loss, value_loss, entropy, ent_coef_loss, ent_coef
 
         return policy_loss, qf1_loss, qf2_loss, value_loss, entropy
+
 
     def learn(self, total_timesteps, callback=None,
               log_interval=4, tb_log_name="SAC", reset_num_timesteps=True, replay_wrapper=None):
@@ -372,10 +400,14 @@ class SAC(OffPolicyRLModel):
 
             start_time = time.time()
             episode_rewards = [0.0]
+            episode_true_rewards = [0.0]
+
+            episode_successor_features = [np.zeros(self.observation_space.shape[0])]
             episode_successes = []
             if self.action_noise is not None:
                 self.action_noise.reset()
             obs = self.env.reset()
+            h_step = 0
             # Retrieve unnormalized observation for saving into the buffer
             if self._vec_normalize_env is not None:
                 obs_ = self._vec_normalize_env.get_original_obs().squeeze()
@@ -405,9 +437,18 @@ class SAC(OffPolicyRLModel):
                     # inferred actions need to be transformed to environment action_space before stepping
                     unscaled_action = unscale_action(self.action_space, action)
 
-                assert action.shape == self.env.action_space.shape
+                    assert action.shape == self.env.action_space.shape
 
-                new_obs, reward, done, info = self.env.step(unscaled_action)
+                if self.using_mdal:
+                    # reward = reward_giver.get_reward(observation, (step+1) * covariance_lambda)
+                    # covariance_lambda = (step+1) / (step + 2) * covariance_lambda \
+                    #                     + np.matmul(np.expand_dims(observation, axis=1), np.expand_dims(observation, axis=0))\
+                    #                     / (step + 2)
+                    reward = self.reward_giver.get_reward(obs)
+                    new_obs, true_reward, done, info = self.env.step(unscaled_action)
+                else:
+                    new_obs, reward, done, info = self.env.step(unscaled_action)
+                    true_reward = reward
 
                 self.num_timesteps += 1
 
@@ -421,9 +462,11 @@ class SAC(OffPolicyRLModel):
                 if self._vec_normalize_env is not None:
                     new_obs_ = self._vec_normalize_env.get_original_obs().squeeze()
                     reward_ = self._vec_normalize_env.get_original_reward().squeeze()
+
                 else:
                     # Avoid changing the original ones
                     obs_, new_obs_, reward_ = obs, new_obs, reward
+                    true_reward_ = true_reward
 
                 # Store transition in the replay buffer.
                 self.replay_buffer_add(obs_, action, reward_, new_obs_, done, info)
@@ -440,9 +483,13 @@ class SAC(OffPolicyRLModel):
                 if writer is not None:
                     # Write reward per episode to tensorboard
                     ep_reward = np.array([reward_]).reshape((1, -1))
+                    ep_true_reward = np.array([true_reward_]).reshape((1, -1))
                     ep_done = np.array([done]).reshape((1, -1))
-                    tf_util.total_episode_reward_logger(self.episode_reward, ep_reward,
+                    # tf_util.total_episode_reward_logger(self.episode_reward, ep_reward,
+                    #                                     ep_done, writer, self.num_timesteps)
+                    tf_util.total_episode_reward_logger(self.episode_reward, ep_true_reward,
                                                         ep_done, writer, self.num_timesteps)
+
 
                 if self.num_timesteps % self.train_freq == 0:
                     callback.on_rollout_end()
@@ -469,15 +516,30 @@ class SAC(OffPolicyRLModel):
                     if len(mb_infos_vals) > 0:
                         infos_values = np.mean(mb_infos_vals, axis=0)
 
+                # Update Rewards
+                if self.using_mdal and self.num_timesteps % self.update_reward_freq == 0 and self.num_timesteps > 1:
+                    policy_successor_features = np.mean(episode_successor_features[-11:-1], axis=0)
+                    self.reward_giver.update_reward(policy_successor_features)
+
                     callback.on_rollout_start()
 
                 episode_rewards[-1] += reward_
+                episode_true_rewards[-1] += true_reward_
+
                 if done:
                     if self.action_noise is not None:
                         self.action_noise.reset()
                     if not isinstance(self.env, VecEnv):
                         obs = self.env.reset()
                     episode_rewards.append(0.0)
+                    episode_true_rewards.append(0.0)
+
+                    episode_successor_features.append(np.zeros(self.observation_space.shape[0]))
+                    h_step = 0
+                else:
+                    episode_successor_features[-1] = np.add(episode_successor_features[-1],
+                                                            (1 - self.gamma) * (self.gamma ** h_step) * obs_)
+                    h_step += 1
 
                     maybe_is_success = info.get('is_success')
                     if maybe_is_success is not None:
@@ -485,8 +547,11 @@ class SAC(OffPolicyRLModel):
 
                 if len(episode_rewards[-101:-1]) == 0:
                     mean_reward = -np.inf
+                    mean_true_reward = -np.inf
                 else:
                     mean_reward = round(float(np.mean(episode_rewards[-101:-1])), 1)
+                    mean_true_reward = round(float(np.mean(episode_true_rewards[-101:-1])), 1)
+
 
                 # substract 1 as we appended a new term just now
                 num_episodes = len(episode_rewards) - 1 
@@ -495,6 +560,7 @@ class SAC(OffPolicyRLModel):
                     fps = int(step / (time.time() - start_time))
                     logger.logkv("episodes", num_episodes)
                     logger.logkv("mean 100 episode reward", mean_reward)
+                    logger.logkv("mean 100 episode true reward", mean_true_reward)
                     if len(self.ep_info_buf) > 0 and len(self.ep_info_buf[0]) > 0:
                         logger.logkv('ep_rewmean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]))
                         logger.logkv('eplenmean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]))
@@ -547,6 +613,7 @@ class SAC(OffPolicyRLModel):
             "buffer_size": self.buffer_size,
             "learning_starts": self.learning_starts,
             "train_freq": self.train_freq,
+            "update_reward_freq": self.update_reward_freq,
             "batch_size": self.batch_size,
             "tau": self.tau,
             "ent_coef": self.ent_coef if isinstance(self.ent_coef, float) else 'auto',
