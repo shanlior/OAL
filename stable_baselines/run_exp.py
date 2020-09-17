@@ -27,7 +27,7 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
         rank = MPI.COMM_WORLD.Get_rank()
         log_path = './experiments/' + str(env_id) + './' + str(algo) + '/gradSteps' + str(sgd_steps) + '_tpi' + str(
             t_pi) + '_tc' + str(t_c) + '_s' + str(seed)
-        expert_path = './expert/' + expert_path + '.npz'
+        expert_path = './experts/' + expert_path + '.npz'
         if not log:
             if rank == 0:
                 logger.configure(log_path)
