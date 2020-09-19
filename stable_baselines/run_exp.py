@@ -9,6 +9,8 @@ import gym
 
 from stable_baselines.common.cmd_util import make_mujoco_env, mujoco_arg_parser
 from stable_baselines import bench, logger
+
+
 from stable_baselines.mdal import MDAL_MDPO_OFF
 from stable_baselines.gail import ExpertDataset, generate_expert_traj
 import os
@@ -63,6 +65,7 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
             train = False
 
         if train:
+            from stable_baselines import SAC
             model = SAC('MlpPolicy', env_id, verbose=1, buffer_size=1000000, batch_size=256, ent_coef='auto',
                         train_freq=1, tau=0.01, gradient_steps=1, learning_starts=10000)
 
