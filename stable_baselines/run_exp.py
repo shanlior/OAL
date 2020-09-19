@@ -43,6 +43,7 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
                 logger.configure(format_strs=[])
                 logger.set_level(logger.DISABLED)
 
+
         # workerseed = seed + 10000 * MPI.COMM_WORLD.Get_rank()
 
         # env = make_mujoco_env(env_id, workerseed)
@@ -56,34 +57,44 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
         env = VecNormalize(env, norm_reward=False, norm_obs=False)
         # env = VecNormalize(env)
 
-        dataset = ExpertDataset(expert_path=expert_path, traj_limitation=10, verbose=1)
+        if algo == 'Train':
+            train = True
+        else:
+            train = False
 
-
-
-        if algo == 'MDAL':
-            model = MDAL_MDPO_OFF('MlpPolicy', env_id, dataset, verbose=1,
-                                  tensorboard_log="./experiments/" + env_name + "/mdal/", seed=seed,
-                                  buffer_size=1000000, ent_coef=1.0, learning_starts=10000, batch_size=256, tau=0.01,
-                                  gamma=0.99, gradient_steps=sgd_steps, mdpo_update_steps=mdpo_update_steps,
-                                  lam=0.0, train_freq=1, tsallis_q=1, reparameterize=True, t_pi=t_pi, t_c=t_c)
-        elif algo == 'GAIL':
-            from mpi4py import MPI
-            from stable_baselines import GAIL
-
-            model = GAIL('MlpPolicy', env_id, dataset, verbose=1,
-                         tensorboard_log="./experiments/" + env_name + "/gail/",
-                         entcoeff=0.0, adversary_entcoeff=0.001)
-        elif algo == 'Train':
+        if train:
             model = SAC('MlpPolicy', env_id, verbose=1, buffer_size=1000000, batch_size=256, ent_coef='auto',
                         train_freq=1, tau=0.01, gradient_steps=1, learning_starts=10000)
 
-            generate_expert_traj(model, env_name + '_' + str(num_timesteps), n_timesteps=int(num_timesteps), n_episodes=10)
+            generate_expert_traj(model, env_name + '_' + str(num_timesteps), n_timesteps=int(num_timesteps),
+                                 n_episodes=10)
             model.save('sac_' + env_name + '_' + str(num_timesteps))
+
         else:
-            raise ValueError("Not a valid algorithm.")
-        if pretrain:
-            model.pretrain(dataset, n_epochs=pretrain_epochs)
-        model.learn(total_timesteps=int(num_timesteps))
+            dataset = ExpertDataset(expert_path=expert_path, traj_limitation=10, verbose=1)
+
+            if algo == 'MDAL':
+                model = MDAL_MDPO_OFF('MlpPolicy', env_id, dataset, verbose=1,
+                                      tensorboard_log="./experiments/" + env_name + "/mdal/", seed=seed,
+                                      buffer_size=1000000, ent_coef=1.0, learning_starts=10000, batch_size=256, tau=0.01,
+                                      gamma=0.99, gradient_steps=sgd_steps, mdpo_update_steps=mdpo_update_steps,
+                                      lam=0.0, train_freq=1, tsallis_q=1, reparameterize=True, t_pi=t_pi, t_c=t_c)
+            elif algo == 'GAIL':
+                from mpi4py import MPI
+                from stable_baselines import GAIL
+
+                model = GAIL('MlpPolicy', env_id, dataset, verbose=1,
+                             tensorboard_log="./experiments/" + env_name + "/gail/",
+                             entcoeff=0.0, adversary_entcoeff=0.001)
+            else:
+                raise ValueError("Not a valid algorithm.")
+
+            if pretrain:
+                model.pretrain(dataset, n_epochs=pretrain_epochs)
+
+            model.learn(total_timesteps=int(num_timesteps))
+
+
         env.close()
 
 
