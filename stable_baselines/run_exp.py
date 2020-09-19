@@ -59,6 +59,7 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
         dataset = ExpertDataset(expert_path=expert_path, traj_limitation=10, verbose=1)
 
 
+
         if algo == 'MDAL':
             model = MDAL_MDPO_OFF('MlpPolicy', env_id, dataset, verbose=1,
                                   tensorboard_log="./experiments/" + env_name + "/mdal/", seed=seed,
@@ -72,7 +73,12 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
             model = GAIL('MlpPolicy', env_id, dataset, verbose=1,
                          tensorboard_log="./experiments/" + env_name + "/gail/",
                          entcoeff=0.0, adversary_entcoeff=0.001)
+        elif algo == 'Train':
+            model = SAC('MlpPolicy', env_id, verbose=1, buffer_size=1000000, batch_size=256, ent_coef='auto',
+                        train_freq=1, tau=0.01, gradient_steps=1, learning_starts=10000)
 
+            generate_expert_traj(model, env_name + '_' + str(num_timesteps), n_timesteps=int(num_timesteps), n_episodes=10)
+            model.save('sac_' + env_name + '_' + str(num_timesteps))
         else:
             raise ValueError("Not a valid algorithm.")
         if pretrain:

@@ -1,6 +1,6 @@
 import gym
 #
-# from stable_baselines import MDAL, GAIL, SAC, MDAL_SAC, MDAL_MDPO_OFF
+from stable_baselines import GAIL, SAC
 from stable_baselines import MDAL_MDPO_OFF
 from stable_baselines.gail import ExpertDataset, generate_expert_traj
 
@@ -17,7 +17,7 @@ from stable_baselines.gail import ExpertDataset, generate_expert_traj
 # Load the expert dataset
 #
 # dataset = ExpertDataset(expert_path='expert_cheetah_2e6.npz', traj_limitation=10, verbose=1)
-dataset = ExpertDataset(expert_path='experts/expert_humanoid_10e6.npz', traj_limitation=10, verbose=1)
+# dataset = ExpertDataset(expert_path='experts/expert_humanoid_10e6.npz', traj_limitation=10, verbose=1)
 
 # #
 #
@@ -27,12 +27,12 @@ dataset = ExpertDataset(expert_path='experts/expert_humanoid_10e6.npz', traj_lim
 #                       gradient_steps=10, lam=0.0, train_freq=1, tsallis_q=1, reparameterize=True,
 #                       t_pi=0.5,
 #                       t_c=0.05)
-model = MDAL_MDPO_OFF('MlpPolicy', 'Humanoid-v2', dataset, verbose=1,
-                      tensorboard_log="./experiments/humanoid/mdal_mdpo_off_tensorboard/", seed=0,
-                      buffer_size=1000000, ent_coef=1.0, learning_starts=10000, batch_size=256, tau=0.01,
-                      gradient_steps=10, mdpo_gradient_steps=10, lam=0.0, train_freq=1, tsallis_q=1, reparameterize=True,
-                      t_pi=0.5, t_c=0.05,
-                      n_cpu_tf_sess=4)
+# model = MDAL_MDPO_OFF('MlpPolicy', 'Humanoid-v2', dataset, verbose=1,
+#                       tensorboard_log="./experiments/humanoid/mdal_mdpo_off_tensorboard/", seed=0,
+#                       buffer_size=1000000, ent_coef=1.0, learning_starts=10000, batch_size=256, tau=0.01,
+#                       gradient_steps=10, mdpo_gradient_steps=10, lam=0.0, train_freq=1, tsallis_q=1, reparameterize=True,
+#                       t_pi=0.5, t_c=0.05,
+#                       n_cpu_tf_sess=4)
 # # model = MDAL('MlpPolicy', 'Humanoid-v2', dataset, exploration_bonus=False,
 # #              verbose=1, tensorboard_log="./experiments/pendulum/mdal_tensorboard/")
 # # # #
@@ -41,9 +41,9 @@ model = MDAL_MDPO_OFF('MlpPolicy', 'Humanoid-v2', dataset, verbose=1,
 #              tensorboard_log="./experiments/cheetah/gail_tensorboard/",
 #              entcoeff=0.0, adversary_entcoeff=0.001)
 # model.pretrain(dataset, n_epochs=100000)
-model.learn(total_timesteps=10000000)
-model.save("gail_cheetah")
-model.save("mdal_off_humanoid_lr=0.05")
+# model.learn(total_timesteps=10000000)
+# model.save("gail_cheetah")
+# model.save("mdal_off_humanoid_lr=0.05")
 
 
 # model = GAIL('MlpPolicy', 'Humanoid-v2', dataset, verbose=1, tensorboard_log="./experiments/humanoid/gail_tensorboard/")
@@ -54,13 +54,23 @@ model.save("mdal_off_humanoid_lr=0.05")
 # # #
 # del model # remove to demonstrate saving and loading
 #
-# model = SAC.load("sac_walker")
+model = SAC.load("sac_humanoid_10e6")
 #
-# env = gym.make('Walker2d-v2')
-# obs = env.reset()
-# sum_rew = 0.0
-# while True:
-#   action, _states = model.predict(obs)
-#   obs, rewards, dones, info = env.step(action)
-#   env.render()
+env = gym.make('Humanoid-v2')
+obs = env.reset()
+sum_rew = 0.0
+avg_rew = 0.0
+iter = 0
+while True:
+  action, _states = model.predict(obs)
+  obs, rewards, dones, info = env.step(action)
+  sum_rew += rewards
+  if dones:
+    obs = env.reset()
+    iter += 1
+    avg_rew = float(iter - 1) / float(iter) * avg_rew + sum_rew / float(iter)
+    print('Episode reward: {}, Average reward: {}'.format(sum_rew, avg_rew))
+    sum_rew = 0.0
+
+  # env.render()
 
