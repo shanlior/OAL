@@ -32,6 +32,9 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
         log_path = './experiments/' + env_name + '/' + str(algo).lower() + '/gradSteps' + str(sgd_steps) + '_tpi' + str(
             t_pi) + '_tc' + str(t_c) + '_s' + str(seed)
         expert_path = './experts/' + expert_path
+
+        num_timesteps = int(num_timesteps)
+
         if log:
             if rank == 0:
                 logger.configure(log_path)
@@ -68,7 +71,6 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
             from stable_baselines import SAC
             model = SAC('MlpPolicy', env_id, verbose=1, buffer_size=1000000, batch_size=256, ent_coef='auto',
                         train_freq=1, tau=0.01, gradient_steps=1, learning_starts=10000)
-            num_timesteps = int(num_timesteps)
             generate_expert_traj(model, expert_path, n_timesteps=num_timesteps, n_episodes=num_trajectories)
             if num_timesteps > 0:
                 model.save('sac_' + env_name + '_' + str(num_timesteps))
@@ -96,7 +98,7 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
             if pretrain:
                 model.pretrain(dataset, n_epochs=pretrain_epochs)
 
-            model.learn(total_timesteps=int(num_timesteps))
+            model.learn(total_timesteps=num_timesteps)
 
 
         env.close()
