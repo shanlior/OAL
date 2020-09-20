@@ -54,23 +54,23 @@ from stable_baselines.gail import ExpertDataset, generate_expert_traj
 # # #
 # del model # remove to demonstrate saving and loading
 #
-model = SAC.load("sac_humanoid_10e6")
-#
-env = gym.make('Humanoid-v2')
-obs = env.reset()
-sum_rew = 0.0
-avg_rew = 0.0
-iter = 0
-while True:
-  action, _states = model.predict(obs)
-  obs, rewards, dones, info = env.step(action)
-  sum_rew += rewards
-  if dones:
-    obs = env.reset()
-    iter += 1
-    avg_rew = float(iter - 1) / float(iter) * avg_rew + sum_rew / float(iter)
-    print('Episode reward: {}, Average reward: {}'.format(sum_rew, avg_rew))
-    sum_rew = 0.0
+# model = SAC.load("sac_humanoid_10e6")
+# #
+# env = gym.make('Humanoid-v2')
+# obs = env.reset()
+# sum_rew = 0.0
+# avg_rew = 0.0
+# iter = 0
+# while True:
+#   action, _states = model.predict(obs)
+#   obs, rewards, dones, info = env.step(action)
+#   sum_rew += rewards
+#   if dones:
+#     obs = env.reset()
+#     iter += 1
+#     avg_rew = float(iter - 1) / float(iter) * avg_rew + sum_rew / float(iter)
+#     print('Episode reward: {}, Average reward: {}'.format(sum_rew, avg_rew))
+#     sum_rew = 0.0
 
   # env.render()
 

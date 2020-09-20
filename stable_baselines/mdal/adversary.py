@@ -27,7 +27,7 @@ def logit_bernoulli_entropy(logits):
     """
     ent = (1. - tf.nn.sigmoid(logits)) * logits - logsigmoid(logits)
     return ent
-
+#
 class TabularAdversary(object):
     def __init__(self, observation_space, action_space, hidden_size,
                  entcoeff=0.00, scope="adversary", normalize=True, expert_features=None,
@@ -139,15 +139,18 @@ class TabularAdversaryTF(object):
         self.hidden_size = hidden_size
         self.normalize = normalize
         self.obs_rms = None
+
         self.expert_features = tf.constant(expert_features, dtype=tf.float32)
+        # self.norm_factor = tf.sqrt(float(self.observation_shape[0]))
 
-        self.norm_factor = tf.sqrt(float(self.observation_shape[0]))
 
-        normalization = np.linalg.norm(expert_features)
-        if normalization > 1:
-            self.reward_vec = tf.Variable(expert_features / (self.norm_factor * normalization))
-        else:
-            self.reward_vec = tf.Variable(expert_features / self.norm_factor)
+        self.normalization = tf.square(float(np.linalg.norm(expert_features)))
+
+        # if normalization > 1:
+        #     self.reward_vec = tf.Variable(expert_features / (self.norm_factor * normalization))
+        # else:
+        #     self.reward_vec = tf.Variable(expert_features / self.norm_factor)
+        self.reward_vec = tf.Variable(expert_features / self.normalization, dtype=tf.float32)
 
         self.exploration_bonus = exploration_bonus
         self.t_c = t_c
@@ -168,10 +171,10 @@ class TabularAdversaryTF(object):
 
             # Update reward
             self.new_reward_vec = self.reward_vec\
-                                    + self.t_c * (self.expert_features - self.features_ph) / self.norm_factor
-            self.normalization = tf.norm(self.new_reward_vec)
-            self.new_reward_vec = tf.cond(normalization > 1,
-                                            true_fn=lambda: self.reward_vec / self.normalization,
+                                    + self.t_c * (self.expert_features - self.features_ph) / self.normalization
+            normalization = tf.norm(self.new_reward_vec) * self.normalization
+            self.new_reward_vec = tf.cond(normalization > 1.0,
+                                            true_fn=lambda: self.reward_vec / normalization,
                                             false_fn=lambda: self.reward_vec)
 
             self.update_reward_op = tf.assign(self.reward_vec, self.new_reward_vec)

@@ -654,7 +654,7 @@ class MDPO_OFF(OffPolicyRLModel):
                         logger.logkv('eplenmean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]))
                     logger.logkv("n_updates", n_updates)
                     logger.logkv("current_lr", current_lr)
-                    logger.logkv("ent_coef", 1-frac)
+                    # logger.logkv("ent_coef", 1-frac)
                     logger.logkv("fps", fps)
                     logger.logkv('time_elapsed', int(time.time() - start_time))
                     if len(episode_successes) > 0:
@@ -665,6 +665,8 @@ class MDPO_OFF(OffPolicyRLModel):
                     logger.logkv("total timesteps", self.num_timesteps)
                     logger.logkv("frac", frac)
                     logger.logkv("t_pi", t_pi)
+                    logger.logkv("t_c", t_c)
+
                     logger.logkv("steps", step)
                     logger.dumpkvs()
                     # Reset infos:
