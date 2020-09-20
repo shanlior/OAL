@@ -665,7 +665,7 @@ class MDPO_OFF(OffPolicyRLModel):
                     logger.logkv("total timesteps", self.num_timesteps)
                     logger.logkv("frac", frac)
                     logger.logkv("t_pi", t_pi)
-                    logger.logkv("t_c", t_c)
+                    logger.logkv("t_c", self.t_c)
 
                     logger.logkv("steps", step)
                     logger.dumpkvs()
