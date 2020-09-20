@@ -17,7 +17,7 @@ import os
 
 
 def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_path, pretrain, pretrain_epochs,
-          mdpo_update_steps):
+          mdpo_update_steps, num_trajectories):
     """
     Train TRPO model for the mujoco environment, for testing purposes
     :param env_id: (str) Environment ID
@@ -31,7 +31,7 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
         env_name = env_id[:-3].lower()
         log_path = './experiments/' + env_name + '/' + str(algo).lower() + '/gradSteps' + str(sgd_steps) + '_tpi' + str(
             t_pi) + '_tc' + str(t_c) + '_s' + str(seed)
-        expert_path = './experts/' + expert_path + '.npz'
+        expert_path = './experts/' + expert_path
         if log:
             if rank == 0:
                 logger.configure(log_path)
@@ -68,12 +68,13 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
             from stable_baselines import SAC
             model = SAC('MlpPolicy', env_id, verbose=1, buffer_size=1000000, batch_size=256, ent_coef='auto',
                         train_freq=1, tau=0.01, gradient_steps=1, learning_starts=10000)
-
-            generate_expert_traj(model, env_name + '_' + str(num_timesteps), n_timesteps=int(num_timesteps),
-                                 n_episodes=10)
-            model.save('sac_' + env_name + '_' + str(num_timesteps))
+            num_timesteps = int(num_timesteps)
+            generate_expert_traj(model, expert_path, n_timesteps=num_timesteps, n_episodes=num_trajectories)
+            if num_timesteps > 0:
+                model.save('sac_' + env_name + '_' + str(num_timesteps))
 
         else:
+            expert_path = expert_path + '.npz'
             dataset = ExpertDataset(expert_path=expert_path, traj_limitation=10, verbose=1)
 
             if algo == 'MDAL':
@@ -112,7 +113,8 @@ def main():
     log = not args.no_log
     train(args.env, algo=args.algo, num_timesteps=args.num_timesteps, seed=args.seed, sgd_steps=args.sgd_steps,
           t_pi=args.t_pi, t_c=args.t_c, log=log, expert_path=args.expert_path,
-          pretrain=args.pretrain, pretrain_epochs=args.pretrain_epochs, mdpo_update_steps=args.mdpo_update_steps)
+          pretrain=args.pretrain, pretrain_epochs=args.pretrain_epochs, mdpo_update_steps=args.mdpo_update_steps,
+          num_trajectories=args.num_trajectories)
 
 
 if __name__ == '__main__':
