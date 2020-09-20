@@ -17,7 +17,7 @@ import os
 
 
 def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_path, pretrain, pretrain_epochs,
-          mdpo_update_steps, num_trajectories):
+          mdpo_update_steps, num_trajectories, expert_model):
     """
     Train TRPO model for the mujoco environment, for testing purposes
     :param env_id: (str) Environment ID
@@ -69,8 +69,11 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
 
         if train:
             from stable_baselines import SAC
-            model = SAC('MlpPolicy', env_id, verbose=1, buffer_size=1000000, batch_size=256, ent_coef='auto',
-                        train_freq=1, tau=0.01, gradient_steps=1, learning_starts=10000)
+            if num_timesteps > 0:
+                model = SAC('MlpPolicy', env_id, verbose=1, buffer_size=1000000, batch_size=256, ent_coef='auto',
+                                train_freq=1, tau=0.01, gradient_steps=1, learning_starts=10000)
+            else:
+                model = SAC.load(expert_model)
             generate_expert_traj(model, expert_path, n_timesteps=num_timesteps, n_episodes=num_trajectories)
             if num_timesteps > 0:
                 model.save('sac_' + env_name + '_' + str(num_timesteps))
@@ -116,7 +119,7 @@ def main():
     train(args.env, algo=args.algo, num_timesteps=args.num_timesteps, seed=args.seed, sgd_steps=args.sgd_steps,
           t_pi=args.t_pi, t_c=args.t_c, log=log, expert_path=args.expert_path,
           pretrain=args.pretrain, pretrain_epochs=args.pretrain_epochs, mdpo_update_steps=args.mdpo_update_steps,
-          num_trajectories=args.num_trajectories)
+          num_trajectories=args.num_trajectories, expert_model=args.expert_model)
 
 
 if __name__ == '__main__':

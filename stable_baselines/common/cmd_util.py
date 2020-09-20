@@ -198,6 +198,7 @@ def mujoco_arg_parser():
     parser.add_argument('--expert-path', help='Expert path', type=str, default='')
     parser.add_argument('--pretrain', default=False, action='store_true')
     parser.add_argument('--pretrain-epochs', type=int, default=int(1e3))
+    parser.add_argument('--expert-model', help='Expert model', type=str, default='')
     parser.add_argument('--num-trajectories', type=int, default=int(10))
 
 
