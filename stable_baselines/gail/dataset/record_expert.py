@@ -96,6 +96,8 @@ def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
     obs = env.reset()
     episode_obs = []
     episode_obs.append([])
+    episode_act = []
+    episode_act.append([])
     episode_starts.append(True)
     reward_sum = 0.0
     idx = 0
@@ -134,6 +136,7 @@ def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
             done = np.array([done[0]])
 
         actions.append(action)
+        episode_act[ep_idx].append(action)
         rewards.append(reward)
         episode_starts.append(done)
         reward_sum += reward
@@ -148,6 +151,7 @@ def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
             ep_idx += 1
             if ep_idx < n_episodes:
                 episode_obs.append([])
+                episode_act.append([])
 
 
     if isinstance(env.observation_space, spaces.Box) and not record_images:
@@ -165,12 +169,13 @@ def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
     gamma = model.gamma
 
 
-    for ep_idx, ep_obs in enumerate(episode_obs):
-        for idx, obs in enumerate(reversed(ep_obs)):
+    for ep_idx, (ep_obs, ep_act), in enumerate(zip(episode_obs, episode_act)):
+        for idx, (obs, act) in enumerate(zip(reversed(ep_obs), reversed(ep_act))):
+            current_features = np.concatenate((obs, act), axis=0)
             if idx == 0:
-                successor_features = (1-gamma) * obs
+                successor_features = (1-gamma) * current_features
             else:
-                successor_features = np.add( gamma * successor_features, (1 - gamma) * obs)
+                successor_features = np.add(gamma * successor_features, (1 - gamma) * current_features)
         if ep_idx == 0:
             sum_successor_features = successor_features
         else:

@@ -5,6 +5,8 @@ from mpi4py import MPI
 import stable_baselines.common.tf_util as tf_util
 from stable_baselines.common.vec_env.vec_normalize import VecNormalize
 from stable_baselines.common.vec_env import DummyVecEnv, SubprocVecEnv
+from stable_baselines.common.mujoco_wrappers import wrap_mujoco
+
 import gym
 
 from stable_baselines.common.cmd_util import make_mujoco_env, mujoco_arg_parser
@@ -17,7 +19,7 @@ import os
 
 
 def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_path, pretrain, pretrain_epochs,
-          mdpo_update_steps, num_trajectories, expert_model):
+          mdpo_update_steps, num_trajectories, expert_model, exploration_bonus, bonus_coef, random_action_len):
     """
     Train TRPO model for the mujoco environment, for testing purposes
     :param env_id: (str) Environment ID
@@ -29,8 +31,15 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
         from mpi4py import MPI
         rank = MPI.COMM_WORLD.Get_rank()
         env_name = env_id[:-3].lower()
-        log_path = './experiments/' + env_name + '/' + str(algo).lower() + '/gradSteps' + str(sgd_steps) + '_tpi' + str(
-            t_pi) + '_tc' + str(t_c) + '_s' + str(seed)
+        log_dir = './experiments/' + env_name + '/' + str(algo).lower() + '/'
+        log_name = str(algo) + '_updateSteps' + str(mdpo_update_steps) + '_tpi' + str(t_pi) + '_tc' + str(t_c) \
+                   + '_randLen' + str(random_action_len)
+        if exploration_bonus:
+            log_name += '_exploration' + str(bonus_coef)
+        log_name+= '_s' + str(seed)
+        if pretrain:
+            log_name = log_name + 'pretrain_' + str(pretrain_epochs)
+        log_path = log_dir + log_name
         expert_path = './experts/' + expert_path
 
         num_timesteps = int(num_timesteps)
@@ -53,13 +62,15 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
 
         # env = make_mujoco_env(env_id, workerseed)
         def make_env():
-            env_out = gym.make(env_id)
+            env_out = gym.make(env_id, reset_noise_scale=1.0)
             env_out = bench.Monitor(env_out, logger.get_dir(), allow_early_resets=True)
             env_out.seed(seed)
+            env_out = wrap_mujoco(env_out, random_action_len=random_action_len)
             return env_out
         #
+
+
         env = DummyVecEnv([make_env])
-        env = VecNormalize(env, norm_reward=False, norm_obs=False)
         # env = VecNormalize(env)
 
         if algo == 'Train':
@@ -69,6 +80,8 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
 
         if train:
             from stable_baselines import SAC
+            env = VecNormalize(env, norm_reward=False, norm_obs=False)
+
             if num_timesteps > 0:
                 model = SAC('MlpPolicy', env_id, verbose=1, buffer_size=1000000, batch_size=256, ent_coef='auto',
                                 train_freq=1, tau=0.01, gradient_steps=1, learning_starts=10000)
@@ -83,16 +96,17 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
             dataset = ExpertDataset(expert_path=expert_path, traj_limitation=10, verbose=1)
 
             if algo == 'MDAL':
-                model = MDAL_MDPO_OFF('MlpPolicy', env_id, dataset, verbose=1,
+                model = MDAL_MDPO_OFF('MlpPolicy', env, dataset, verbose=1,
                                       tensorboard_log="./experiments/" + env_name + "/mdal/", seed=seed,
                                       buffer_size=1000000, ent_coef=1.0, learning_starts=10000, batch_size=256, tau=0.01,
                                       gamma=0.99, gradient_steps=sgd_steps, mdpo_update_steps=mdpo_update_steps,
-                                      lam=0.0, train_freq=1, tsallis_q=1, reparameterize=True, t_pi=t_pi, t_c=t_c)
+                                      lam=0.0, train_freq=1, tsallis_q=1, reparameterize=True, t_pi=t_pi, t_c=t_c,
+                                      exploration_bonus=exploration_bonus, bonus_coef=bonus_coef)
             elif algo == 'GAIL':
                 from mpi4py import MPI
                 from stable_baselines import GAIL
 
-                model = GAIL('MlpPolicy', env_id, dataset, verbose=1,
+                model = GAIL('MlpPolicy', env, dataset, verbose=1,
                              tensorboard_log="./experiments/" + env_name + "/gail/", seed=seed,
                              entcoeff=0.0, adversary_entcoeff=0.001)
             else:
@@ -101,7 +115,7 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
             if pretrain:
                 model.pretrain(dataset, n_epochs=pretrain_epochs)
 
-            model.learn(total_timesteps=num_timesteps)
+            model.learn(total_timesteps=num_timesteps, tb_log_name=log_name)
 
 
         env.close()
@@ -119,7 +133,8 @@ def main():
     train(args.env, algo=args.algo, num_timesteps=args.num_timesteps, seed=args.seed, sgd_steps=args.sgd_steps,
           t_pi=args.t_pi, t_c=args.t_c, log=log, expert_path=args.expert_path,
           pretrain=args.pretrain, pretrain_epochs=args.pretrain_epochs, mdpo_update_steps=args.mdpo_update_steps,
-          num_trajectories=args.num_trajectories, expert_model=args.expert_model)
+          num_trajectories=args.num_trajectories, expert_model=args.expert_model,
+          exploration_bonus=args.exploration, bonus_coef=args.bonus_coef, random_action_len=args.random_action_len)
 
 
 if __name__ == '__main__':

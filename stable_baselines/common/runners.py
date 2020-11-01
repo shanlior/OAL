@@ -7,6 +7,7 @@ import numpy as np
 
 from stable_baselines.common.callbacks import BaseCallback
 from stable_baselines.common.vec_env import VecEnv
+from stable_baselines.common.math_util import safe_mean, unscale_action, scale_action
 
 if typing.TYPE_CHECKING:
     from stable_baselines.common.base_class import BaseRLModel  # pytype: disable=pyi-error
@@ -55,7 +56,8 @@ class AbstractEnvRunner(ABC):
         raise NotImplementedError
 
 
-def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, mdal=False, callback=None):
+def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, mdal=False, callback=None,
+                           action_space=None):
     """
     Compute target value using TD(lambda) estimator, and advantage with GAE(lambda)
     :param policy: (MLPPolicy) the policy
@@ -85,6 +87,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
 
     # Initialize state variables
     step = 0
+    h_step = 0
     action = env.action_space.sample()  # not used, just so we have the datatype
     observation = env.reset()
 
@@ -113,6 +116,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
 
     while True:
         action, vpred, states, _ = policy.step(observation.reshape(-1, *observation.shape), states, done)
+            # action = scale_action(action_space, unscaled_action)
         # Slight weirdness here because we need value function at time T
         # before returning segment [0, T-1] so we get the correct
         # terminal value
@@ -166,6 +170,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
         vpreds[i] = vpred[0]
         actions[i] = action[0]
         episode_starts[i] = episode_start
+
 
         clipped_action = action
         # Clip the actions to avoid out of bound error
@@ -240,6 +245,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
                 if not gail:
                     cur_ep_ret = maybe_ep_info['r']
                 cur_ep_true_ret = maybe_ep_info['r']
+            h_step = 0
 
             ep_rets.append(cur_ep_ret)
             ep_true_rets.append(cur_ep_true_ret)
@@ -249,4 +255,6 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
             current_ep_len = 0
             if not isinstance(env, VecEnv):
                 observation = env.reset()
+        else:
+            h_step += 1
         step += 1

@@ -35,3 +35,31 @@ class RunningMeanStd(object):
         self.mean = new_mean
         self.var = new_var
         self.count = new_count
+
+class RunningMinMax(object):
+    def __init__(self, epsilon=1e-5, shape=()):
+        """
+        calulates the running mean and std of a data stream
+        https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Parallel_algorithm
+
+        :param epsilon: (float) helps with arithmetic issues
+        :param shape: (tuple) the shape of the data stream's output
+        """
+        self.min = np.ones(shape, 'float32') * np.inf
+        self.max = np.ones(shape, 'float32') * (-np.inf)
+        self.scale = np.ones(shape, 'float32')
+        self.epsilon = epsilon * np.ones(shape, 'float32')
+
+    def update(self, arr):
+        batch_min = np.min(arr, axis=0)
+        batch_max = np.max(arr, axis=0)
+        # batch_count = arr.shape[0]
+        self.update_from_moments(batch_min, batch_max)
+
+    def update_from_moments(self, batch_min, batch_max):
+
+        self.min = np.where(self.min > batch_min, batch_min, self.min)
+        self.max = np.where(self.min < batch_min, batch_max, self.max)
+
+        self.scale = np.where((self.max - self.min) > self.epsilon, self.max - self.min, self.epsilon)
+

@@ -1,6 +1,8 @@
 import time
 import warnings
 
+import gym
+
 import numpy as np
 import tensorflow as tf
 
@@ -11,6 +13,7 @@ from stable_baselines.common.schedules import get_schedule_fn
 from stable_baselines.common.buffers import ReplayBuffer
 from stable_baselines.mdpo.policies import MDPOOFFPolicy
 from stable_baselines import logger
+
 
 
 class MDPO_OFF(OffPolicyRLModel):
@@ -66,8 +69,7 @@ class MDPO_OFF(OffPolicyRLModel):
                  random_exploration=0.0, verbose=0, tensorboard_log=None,
                  _init_setup_model=True, policy_kwargs=None, full_tensorboard_log=False,
                  seed=None, n_cpu_tf_sess=None, tsallis_q=1, reparameterize=True, t_pi=1.0, t_c=0.01,
-                 timesteps_per_batch=1024, mdpo_update_steps=1
-    ):
+                 timesteps_per_batch=1024, mdpo_update_steps=1):
 
         super(MDPO_OFF, self).__init__(policy=policy, env=env, replay_buffer=None, verbose=verbose,
                                   policy_base=MDPOOFFPolicy, requires_vec_env=False, policy_kwargs=policy_kwargs,
@@ -79,6 +81,7 @@ class MDPO_OFF(OffPolicyRLModel):
         self.learning_starts = learning_starts
         self.train_freq = train_freq
         self.update_reward_freq = update_reward_freq
+        self.update_reward_counter = 0
         self.batch_size = batch_size
         self.tau = tau
         self.timesteps_per_batch = timesteps_per_batch
@@ -166,6 +169,19 @@ class MDPO_OFF(OffPolicyRLModel):
 
         # prevent import loops
         from stable_baselines.mdal.adversary import TabularAdversary, TabularAdversaryTF
+
+        if isinstance(self.action_space, gym.spaces.Box):
+            # Continuous action space
+            self.discrete_actions = False
+            self.n_actions = self.action_space.shape[0]
+        elif isinstance(action_space, gym.spaces.Discrete):
+            self.n_actions = self.action_space.n
+            self.discrete_actions = True
+        else:
+            raise ValueError('Action space not supported: {}'.format(action_space))
+
+        self.n_features = self.n_actions + self.observation_space.shape[0]
+
 
         with SetVerbosity(self.verbose):
             self.graph = tf.Graph()
@@ -415,7 +431,7 @@ class MDPO_OFF(OffPolicyRLModel):
         batch_obs, batch_actions, batch_rewards, batch_next_obs, batch_dones, batch_terminals = batch
 
         if self.using_mdal:
-            batch_rewards = self.reward_giver.get_reward(batch_obs)
+            batch_rewards = self.reward_giver.get_reward(batch_obs, batch_actions)
 
         feed_dict = {
             self.observations_ph: batch_obs,
@@ -483,7 +499,7 @@ class MDPO_OFF(OffPolicyRLModel):
             episode_rewards = [0.0]
             episode_true_rewards = [0.0]
 
-            episode_successor_features = [np.zeros(self.observation_space.shape[0])]
+            episode_successor_features = [np.zeros(self.n_features)]
             episode_successes = []
             if self.action_noise is not None:
                 self.action_noise.reset()
@@ -492,6 +508,9 @@ class MDPO_OFF(OffPolicyRLModel):
             # Retrieve unnormalized observation for saving into the buffer
             if self._vec_normalize_env is not None:
                 obs_ = self._vec_normalize_env.get_original_obs().squeeze()
+            else:
+                obs_ = obs
+
 
             n_updates = 0
             infos_values = []
@@ -510,6 +529,10 @@ class MDPO_OFF(OffPolicyRLModel):
                     unscaled_action = self.env.action_space.sample()
                     action = scale_action(self.action_space, unscaled_action)
                 else:
+                    # if h_step < self.random_action_len:
+                    #     unscaled_action = self.env.action_space.sample()
+                    #     action = scale_action(self.action_space, unscaled_action)
+                    # else:
                     action = self.policy_tf.step(obs[None], deterministic=False).flatten()
                     # Add noise to the action (improve exploration,
                     # not needed in general)
@@ -517,7 +540,6 @@ class MDPO_OFF(OffPolicyRLModel):
                         action = np.clip(action + self.action_noise(), -1, 1)
                     # inferred actions need to be transformed to environment action_space before stepping
                     unscaled_action = unscale_action(self.action_space, action)
-
                     assert action.shape == self.env.action_space.shape
 
                 if self.using_mdal:
@@ -525,7 +547,7 @@ class MDPO_OFF(OffPolicyRLModel):
                     # covariance_lambda = (step+1) / (step + 2) * covariance_lambda \
                     #                     + np.matmul(np.expand_dims(observation, axis=1), np.expand_dims(observation, axis=0))\
                     #                     / (step + 2)
-                    reward = self.reward_giver.get_reward(obs)
+                    reward = self.reward_giver.get_reward(obs_, action)
                     new_obs, true_reward, done, info = self.env.step(unscaled_action)
                 else:
                     new_obs, reward, done, info = self.env.step(unscaled_action)
@@ -606,8 +628,28 @@ class MDPO_OFF(OffPolicyRLModel):
 
                 # Update Rewards
                 if self.using_mdal and self.num_timesteps % self.update_reward_freq == 0 and self.num_timesteps > 1:
-                    policy_successor_features = np.mean(episode_successor_features[-21:-1], axis=0)
+                    # policy_successor_features = np.mean(episode_successor_features[-21:-1], axis=0)
+                    if done:
+                        batch_successor_features = episode_successor_features[self.update_reward_counter:]
+                    else:
+                        batch_successor_features = episode_successor_features[self.update_reward_counter:-1]
+
+                    policy_successor_features = np.mean(batch_successor_features, axis=0)
+                    if self.reward_giver.normalize:
+                        if self.reward_giver.is_action_features:
+                            self.reward_giver.obs_rms.update(np.array(batch_successor_features))
+                        else:
+                            self.reward_giver.obs_rms.update(
+                                np.array(batch_successor_features)[:,:self.observation_space.shape[0]])
+
+
                     self.reward_giver.update_reward(policy_successor_features)
+
+
+                    self.update_reward_counter = 0
+
+
+
 
                     callback.on_rollout_start()
 
@@ -622,11 +664,13 @@ class MDPO_OFF(OffPolicyRLModel):
                     episode_rewards.append(0.0)
                     episode_true_rewards.append(0.0)
 
-                    episode_successor_features.append(np.zeros(self.observation_space.shape[0]))
+                    episode_successor_features.append(np.zeros(self.n_features))
                     h_step = 0
+                    self.update_reward_counter -= 1
                 else:
                     episode_successor_features[-1] = np.add(episode_successor_features[-1],
-                                                            (1 - self.gamma) * (self.gamma ** h_step) * obs_)
+                                                            (1 - self.gamma) * (self.gamma ** h_step) *
+                                                            np.concatenate((obs_, action), axis=0))
                     h_step += 1
 
                     maybe_is_success = info.get('is_success')
@@ -637,7 +681,7 @@ class MDPO_OFF(OffPolicyRLModel):
                     mean_reward = -np.inf
                     mean_true_reward = -np.inf
                 else:
-                    mean_reward = round(float(np.mean(episode_rewards[-101:-1])), 1)
+                    mean_reward = round(float(np.mean(episode_rewards[-101:-1])), 2)
                     mean_true_reward = round(float(np.mean(episode_true_rewards[-101:-1])), 1)
 
 
@@ -666,6 +710,8 @@ class MDPO_OFF(OffPolicyRLModel):
                     logger.logkv("frac", frac)
                     logger.logkv("t_pi", t_pi)
                     logger.logkv("t_c", self.t_c)
+                    logger.logkv("bonus_coef", self.bonus_coef)
+
 
                     logger.logkv("steps", step)
                     logger.dumpkvs()

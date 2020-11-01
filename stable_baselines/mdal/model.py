@@ -168,6 +168,8 @@ class MDAL_MDPO_OFF(MDPO_OFF):
                  g_step=3, d_step=1, d_stepsize=3e-4, verbose=0,
                  _init_setup_model=True, exploration_bonus=False, bonus_coef=0.01, **kwargs):
         super().__init__(policy, env, verbose=verbose, _init_setup_model=False, **kwargs)
+        self.observation_space = env.observation_space
+        self.action_space = env.action_space
         self.using_mdal = True
         self.expert_dataset = expert_dataset
         self.g_step = g_step

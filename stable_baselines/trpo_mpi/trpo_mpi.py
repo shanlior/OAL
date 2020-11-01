@@ -198,11 +198,11 @@ class TRPO(ActorCriticRLModel):
                     # Fisher vector products
                     fvp = tf_util.flatgrad(gvp, var_list)
 
-                    tf.summary.scalar('entropy_loss', meanent)
-                    tf.summary.scalar('policy_gradient_loss', optimgain)
-                    tf.summary.scalar('value_function_loss', surrgain)
-                    tf.summary.scalar('approximate_kullback-leibler', meankl)
-                    tf.summary.scalar('loss', optimgain + meankl + entbonus + surrgain + meanent)
+                    # tf.summary.scalar('entropy_loss', meanent)
+                    # tf.summary.scalar('policy_gradient_loss', optimgain)
+                    # tf.summary.scalar('value_function_loss', surrgain)
+                    # tf.summary.scalar('approximate_kullback-leibler', meankl)
+                    # tf.summary.scalar('loss', optimgain + meankl + entbonus + surrgain + meanent)
 
                     self.assign_old_eq_new = \
                         tf_util.function([], [], updates=[tf.assign(oldv, newv) for (oldv, newv) in
@@ -246,20 +246,20 @@ class TRPO(ActorCriticRLModel):
                     self.vfadam.sync()
 
                 with tf.variable_scope("input_info", reuse=False):
-                    tf.summary.scalar('discounted_rewards', tf.reduce_mean(ret))
+                #     tf.summary.scalar('discounted_rewards', tf.reduce_mean(ret))
                     tf.summary.scalar('learning_rate', tf.reduce_mean(self.vf_stepsize))
-                    tf.summary.scalar('advantage', tf.reduce_mean(atarg))
-                    tf.summary.scalar('kl_clip_range', tf.reduce_mean(self.max_kl))
-
-                    if self.full_tensorboard_log:
-                        tf.summary.histogram('discounted_rewards', ret)
-                        tf.summary.histogram('learning_rate', self.vf_stepsize)
-                        tf.summary.histogram('advantage', atarg)
-                        tf.summary.histogram('kl_clip_range', self.max_kl)
-                        if tf_util.is_image(self.observation_space):
-                            tf.summary.image('observation', observation)
-                        else:
-                            tf.summary.histogram('observation', observation)
+                #     tf.summary.scalar('advantage', tf.reduce_mean(atarg))
+                #     tf.summary.scalar('kl_clip_range', tf.reduce_mean(self.max_kl))
+                #
+                #     if self.full_tensorboard_log:
+                #         tf.summary.histogram('discounted_rewards', ret)
+                #         tf.summary.histogram('learning_rate', self.vf_stepsize)
+                #         tf.summary.histogram('advantage', atarg)
+                #         tf.summary.histogram('kl_clip_range', self.max_kl)
+                #         if tf_util.is_image(self.observation_space):
+                #             tf.summary.image('observation', observation)
+                #         else:
+                #             tf.summary.histogram('observation', observation)
 
                 self.timed = timed
                 self.allmean = allmean
@@ -298,7 +298,8 @@ class TRPO(ActorCriticRLModel):
 
                 seg_gen = traj_segment_generator(self.policy_pi, self.env, self.timesteps_per_batch,
                                                  reward_giver=self.reward_giver,
-                                                 gail=self.using_gail, mdal=self.using_mdal, callback=callback)
+                                                 gail=self.using_gail, mdal=self.using_mdal,
+                                                 action_space=self.action_space, callback=callback)
 
                 episodes_so_far = 0
                 timesteps_so_far = 0
