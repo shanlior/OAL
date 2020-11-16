@@ -519,7 +519,10 @@ class TRPO(ActorCriticRLModel):
                     iters_so_far += 1
 
                     logger.record_tabular("EpisodesSoFar", episodes_so_far)
-                    logger.record_tabular("TimestepsSoFar", self.num_timesteps)
+                    # logger.record_tabular("TimestepsSoFar", self.num_timesteps)
+                    logger.record_tabular("steps", self.num_timesteps)
+                    logger.record_tabular("seed", self.seed)
+
                     logger.record_tabular("TimeElapsed", time.time() - t_start)
 
                     if self.verbose >= 1 and self.rank == 0:

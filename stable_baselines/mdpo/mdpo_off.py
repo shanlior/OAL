@@ -180,7 +180,11 @@ class MDPO_OFF(OffPolicyRLModel):
         else:
             raise ValueError('Action space not supported: {}'.format(action_space))
 
-        self.n_features = self.n_actions + self.observation_space.shape[0]
+        if self.is_action_features:
+            self.n_features = self.n_actions + self.observation_space.shape[0]
+        else:
+            self.n_features = self.observation_space.shape[0]
+
 
 
         with SetVerbosity(self.verbose):
@@ -197,7 +201,8 @@ class MDPO_OFF(OffPolicyRLModel):
                                                              expert_features=self.expert_dataset.successor_features,
                                                              exploration_bonus=self.exploration_bonus,
                                                              bonus_coef=self.bonus_coef,
-                                                             t_c=self.t_c)
+                                                             t_c=self.t_c,
+                                                             is_action_features=self.is_action_features)
 
                 self.replay_buffer = ReplayBuffer(self.buffer_size, info=True)
 
@@ -475,7 +480,7 @@ class MDPO_OFF(OffPolicyRLModel):
 
 
     def learn(self, total_timesteps, callback=None,
-              log_interval=4, tb_log_name="MDPO_off", reset_num_timesteps=True, replay_wrapper=None):
+              log_interval=2000, tb_log_name="MDPO_off", reset_num_timesteps=True, replay_wrapper=None):
 
         new_tb_log = self._init_num_timesteps(reset_num_timesteps)
         callback = self._init_callback(callback)
@@ -668,9 +673,13 @@ class MDPO_OFF(OffPolicyRLModel):
                     h_step = 0
                     self.update_reward_counter -= 1
                 else:
+                    if self.is_action_features:
+                        concat_obs_ = np.concatenate((obs_, action), axis=0)
+                    else:
+                        concat_obs_ = obs_
                     episode_successor_features[-1] = np.add(episode_successor_features[-1],
-                                                            (1 - self.gamma) * (self.gamma ** h_step) *
-                                                            np.concatenate((obs_, action), axis=0))
+                                                            (1 - self.gamma) * (self.gamma ** h_step) * concat_obs_)
+
                     h_step += 1
 
                     maybe_is_success = info.get('is_success')
@@ -688,13 +697,15 @@ class MDPO_OFF(OffPolicyRLModel):
                 # substract 1 as we appended a new term just now
                 num_episodes = len(episode_rewards) - 1 
                 # Display training infos
-                if self.verbose >= 1 and done and log_interval is not None and num_episodes % log_interval == 0:
+                # if self.verbose >= 1 and done and log_interval is not None and num_episodes % log_interval == 0:
+                if self.verbose >= 1 and step % log_interval == 0: #done and log_interval is not None and len(episode_rewards) % log_interval == 0:
                     fps = int(step / (time.time() - start_time))
+                    logger.logkv("steps", step)
                     logger.logkv("episodes", num_episodes)
                     logger.logkv("mean 100 episode reward", mean_reward)
                     logger.logkv("mean 100 episode true reward", mean_true_reward)
                     if len(self.ep_info_buf) > 0 and len(self.ep_info_buf[0]) > 0:
-                        logger.logkv('ep_rewmean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]))
+                        logger.logkv('EpTrueRewMean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]))
                         logger.logkv('eplenmean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]))
                     logger.logkv("n_updates", n_updates)
                     logger.logkv("current_lr", current_lr)
@@ -711,9 +722,8 @@ class MDPO_OFF(OffPolicyRLModel):
                     logger.logkv("t_pi", t_pi)
                     logger.logkv("t_c", self.t_c)
                     logger.logkv("bonus_coef", self.bonus_coef)
+                    logger.logkv("seed", self.seed)
 
-
-                    logger.logkv("steps", step)
                     logger.dumpkvs()
                     # Reset infos:
                     infos_values = []

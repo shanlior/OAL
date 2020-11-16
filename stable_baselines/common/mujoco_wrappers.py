@@ -86,7 +86,7 @@ class RandomResetEnv(gym.Wrapper):
 #         self._elapsed_steps = 0
 #         return self.env.reset(**kwargs)
 
-def wrap_mujoco(env, **kwargs):
+def wrap_mujoco(env, random_reset=False, **kwargs):
     """
     Configure environment for DeepMind-style Atari.
 
@@ -97,6 +97,7 @@ def wrap_mujoco(env, **kwargs):
     :param scale: (bool) wrap the scaling observation wrapper
     :return: (Gym Environment) the wrapped atari environment
     """
-    env = RandomResetEnv(env, **kwargs)
+    if random_reset:
+        env = RandomResetEnv(env, **kwargs)
 
     return env

@@ -201,8 +201,12 @@ def mujoco_arg_parser():
     parser.add_argument('--expert-model', help='Expert model', type=str, default='')
     parser.add_argument('--num-trajectories', type=int, default=int(10))
     parser.add_argument('--exploration', default=False, action='store_true')
-    parser.add_argument('--bonus-coef', type=float, default=float(0.01))
+    parser.add_argument('--bonus-coef', type=float, default=float(0.0))
     parser.add_argument('--random-action-len', type=int, default=int(0))
+    parser.add_argument('--num-seeds', type=int, default=int(1))
+    parser.add_argument('--states', default=False, action='store_true')
+
+
 
 
 

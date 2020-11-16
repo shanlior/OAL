@@ -48,7 +48,6 @@ class GAIL(TRPO):
         self.d_stepsize = d_stepsize
         self.hidden_size_adversary = hidden_size_adversary
         self.adversary_entcoeff = adversary_entcoeff
-        self.random_action_len = random_action_len
 
         if _init_setup_model:
             self.setup_model()

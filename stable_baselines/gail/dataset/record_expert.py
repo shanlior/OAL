@@ -12,7 +12,7 @@ from stable_baselines.common.base_class import _UnvecWrapper
 
 
 def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
-                         n_episodes=100, image_folder='recorded_images'):
+                         n_episodes=100, evaluate=False, image_folder='recorded_images'):
     """
     Train expert controller (if needed) and record expert trajectories.
 
@@ -198,8 +198,9 @@ def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
     }  # type: Dict[str, np.ndarray]
     for key, val in numpy_dict.items():
         print(key, val.shape)
+    print(np.mean(episode_returns))
 
-    if save_path is not None:
+    if save_path is not None and not evaluate:
         np.savez(save_path, **numpy_dict)
 
     env.close()
