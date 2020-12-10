@@ -91,11 +91,15 @@ def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
     episode_returns = np.zeros((n_episodes,))
 
     episode_starts = []
+    gamma = model.gamma
 
     ep_idx = 0
+    h_step = 0
     obs = env.reset()
     episode_obs = []
     episode_obs.append([])
+    episode_gammas = []
+    episode_gammas.append([])
     episode_act = []
     episode_act.append([])
     episode_starts.append(True)
@@ -136,11 +140,13 @@ def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
             done = np.array([done[0]])
 
         actions.append(action)
+        episode_gammas[ep_idx].append(gamma ** h_step)
         episode_act[ep_idx].append(action)
         rewards.append(reward)
         episode_starts.append(done)
         reward_sum += reward
         idx += 1
+        h_step += 1
         if done:
             if not is_vec_env:
                 obs = env.reset()
@@ -148,10 +154,13 @@ def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
                 state = None
             episode_returns[ep_idx] = reward_sum
             reward_sum = 0.0
+            h_step = 0
             ep_idx += 1
             if ep_idx < n_episodes:
                 episode_obs.append([])
                 episode_act.append([])
+                episode_gammas.append([])
+
 
 
     if isinstance(env.observation_space, spaces.Box) and not record_images:
@@ -166,7 +175,6 @@ def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
     elif isinstance(env.action_space, spaces.Discrete):
         actions = np.array(actions).reshape((-1, 1))
 
-    gamma = model.gamma
 
 
     for ep_idx, (ep_obs, ep_act), in enumerate(zip(episode_obs, episode_act)):
@@ -191,6 +199,9 @@ def generate_expert_traj(model, save_path=None, env=None, n_timesteps=0,
     numpy_dict = {
         'actions': actions,
         'obs': observations,
+        'ep_obs': np.array(episode_obs),
+        'ep_acs': np.array(episode_act),
+        'ep_gammas': np.array(episode_gammas),
         'rewards': rewards,
         'episode_returns': episode_returns,
         'episode_starts': episode_starts,

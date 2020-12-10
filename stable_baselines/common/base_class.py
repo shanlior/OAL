@@ -93,6 +93,7 @@ class BaseRLModel(ABC):
                 self.n_envs = 1
 
         # Get VecNormalize object if it exists
+
         self._vec_normalize_env = unwrap_vec_normalize(self.env)
 
     def get_env(self):

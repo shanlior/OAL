@@ -6,6 +6,8 @@ import gym
 import numpy as np
 import tensorflow as tf
 
+
+from stable_baselines.common import dataset
 from stable_baselines.common import tf_util, OffPolicyRLModel, SetVerbosity, TensorboardWriter
 from stable_baselines.common.vec_env import VecEnv
 from stable_baselines.common.math_util import safe_mean, unscale_action, scale_action
@@ -13,6 +15,7 @@ from stable_baselines.common.schedules import get_schedule_fn
 from stable_baselines.common.buffers import ReplayBuffer
 from stable_baselines.mdpo.policies import MDPOOFFPolicy
 from stable_baselines import logger
+from collections import deque
 
 
 
@@ -168,7 +171,7 @@ class MDPO_OFF(OffPolicyRLModel):
     def setup_model(self):
 
         # prevent import loops
-        from stable_baselines.mdal.adversary import TabularAdversary, TabularAdversaryTF
+        from stable_baselines.mdal.adversary import TabularAdversary, TabularAdversaryTF, NeuralAdversary
 
         if isinstance(self.action_space, gym.spaces.Box):
             # Continuous action space
@@ -195,16 +198,24 @@ class MDPO_OFF(OffPolicyRLModel):
                 self.sess = tf_util.single_threaded_session(graph=self.graph)
 
                 if self.using_mdal:
-                    self.reward_giver = TabularAdversaryTF(self.sess, self.observation_space, self.action_space,
-                                                             self.hidden_size_adversary,
-                                                             entcoeff=self.adversary_entcoeff,
-                                                             expert_features=self.expert_dataset.successor_features,
-                                                             exploration_bonus=self.exploration_bonus,
-                                                             bonus_coef=self.bonus_coef,
-                                                             t_c=self.t_c,
-                                                             is_action_features=self.is_action_features)
+                    if self.neural:
+                        self.reward_giver = NeuralAdversary(self.sess, self.observation_space, self.action_space,
+                                                            self.hidden_size_adversary)
+
+                    else:
+                        self.reward_giver = TabularAdversaryTF(self.sess, self.observation_space, self.action_space,
+                                                                 self.hidden_size_adversary,
+                                                                 entcoeff=self.adversary_entcoeff,
+                                                                 expert_features=self.expert_dataset.successor_features,
+                                                                 exploration_bonus=self.exploration_bonus,
+                                                                 bonus_coef=self.bonus_coef,
+                                                                 t_c=self.t_c,
+                                                                 is_action_features=self.is_action_features)
+
 
                 self.replay_buffer = ReplayBuffer(self.buffer_size, info=True)
+                # if self.neural:
+                    # self.traj_replay_buffer = ReplayBuffer(10, info=True)
 
                 with tf.variable_scope("input", reuse=False):
                     # Create policy and target TF objects
@@ -359,6 +370,10 @@ class MDPO_OFF(OffPolicyRLModel):
                     # value_optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph)
                     value_optimizer = tf.train.AdamOptimizer(learning_rate=3e-4)
 
+                    # if self.using_mdal and self.neural:
+                    #     self.reward_optimizer = tf.train.AdamOptimizer(learning_rate=3e-4)
+
+
                     values_params = tf_util.get_trainable_vars('model/values_fn')
 
                     source_params = tf_util.get_trainable_vars("model/values_fn")
@@ -405,6 +420,11 @@ class MDPO_OFF(OffPolicyRLModel):
                                 self.infos_names += ['ent_coef_loss', 'ent_coef']
                                 self.step_ops += [ent_coef_op, ent_coef_loss, self.ent_coef]
 
+                    # if self.neural:
+                    #     with tf.control_dependencies([reward_train_op]):
+                    #         self.reward_train_op = [reward_train_op]
+
+
                     # Monitor losses and entropy in tensorboard
                     # tf.summary.scalar('policy_loss', policy_loss)
                     # tf.summary.scalar('qf1_loss', qf1_loss)
@@ -417,8 +437,12 @@ class MDPO_OFF(OffPolicyRLModel):
 
                     # tf.summary.scalar('learning_rate', tf.reduce_mean(self.learning_rate_ph))
 
+
+
                 # Retrieve parameters that must be saved
                 self.params = tf_util.get_trainable_vars("model")
+                if self.using_mdal and self.neural:
+                    self.params.extend(self.reward_giver.get_trainable_variables())
                 self.target_params = tf_util.get_trainable_vars("target/values_fn")
 
                 # Initialize Variables and target network
@@ -449,35 +473,15 @@ class MDPO_OFF(OffPolicyRLModel):
 
         }
 
-        # out  = [policy_loss, qf1_loss, qf2_loss,
-        #         value_loss, qf1, qf2, value_fn, logp_pi,
-        #         self.entropy, policy_train_op, train_values_op]
-
-        # Do one gradient step
-        # and optionally compute log for tensorboard
-        # if writer is not None and (self.summary_cycle % self.summary_period) == 0:
-        #     out = self.sess.run([self.summary] + self.step_ops, feed_dict)
-        #     summary = out.pop(0)
-        #     writer.add_summary(summary, step)
-        # else:
-            # out = self.sess.run(self.step_ops, feed_dict)
-
         out = self.sess.run(self.step_ops, feed_dict)
 
-        # self.summary_cycle += 1
-        # Unpack to monitor losses and entropy
-        # policy_loss, qf1_loss, qf2_loss, value_loss, *values = out
-        # qf1, qf2, value_fn, logp_pi, entropy, *_ = values
-        # entropy = values[4]
-
-        # if self.log_ent_coef is not None:
-        #     ent_coef_loss, ent_coef = values[-2:]
-        #     return policy_loss, qf1_loss, qf2_loss, value_loss, entropy, ent_coef_loss, ent_coef
-
-        # return policy_loss, qf1_loss, qf2_loss, value_loss, entropy
         return
 
-
+    # def _initialize_dataloader(self):
+    #     """Initialize dataloader."""
+    #     # batchsize = self.timesteps_per_batch // self.d_step
+    #     batchsize = 1
+    #     self.expert_dataset.init_dataloader(batchsize)
 
     def learn(self, total_timesteps, callback=None,
               log_interval=2000, tb_log_name="MDPO_off", reset_num_timesteps=True, replay_wrapper=None):
@@ -487,6 +491,8 @@ class MDPO_OFF(OffPolicyRLModel):
 
         if replay_wrapper is not None:
             self.replay_buffer = replay_wrapper(self.replay_buffer)
+            # if self.neural:
+            #     self.traj_replay_buffer = replay_wrapper(self.traj_replay_buffer)
 
         with SetVerbosity(self.verbose), TensorboardWriter(self.graph, self.tensorboard_log, tb_log_name, new_tb_log) \
                 as writer:
@@ -503,8 +509,13 @@ class MDPO_OFF(OffPolicyRLModel):
             start_time = time.time()
             episode_rewards = [0.0]
             episode_true_rewards = [0.0]
+            if self.using_mdal:
+                # self._initialize_dataloader()
+                true_reward_buffer = deque(maxlen=40)
 
             episode_successor_features = [np.zeros(self.n_features)]
+            features_buffer = {}
+            features_buffer['obs'], features_buffer['acs'], features_buffer['gammas'] = [[]], [[]], [[]]
             episode_successes = []
             if self.action_noise is not None:
                 self.action_noise.reset()
@@ -633,25 +644,70 @@ class MDPO_OFF(OffPolicyRLModel):
 
                 # Update Rewards
                 if self.using_mdal and self.num_timesteps % self.update_reward_freq == 0 and self.num_timesteps > 1:
-                    # policy_successor_features = np.mean(episode_successor_features[-21:-1], axis=0)
-                    if done:
-                        batch_successor_features = episode_successor_features[self.update_reward_counter:]
-                    else:
-                        batch_successor_features = episode_successor_features[self.update_reward_counter:-1]
 
-                    policy_successor_features = np.mean(batch_successor_features, axis=0)
-                    if self.reward_giver.normalize:
-                        if self.reward_giver.is_action_features:
-                            self.reward_giver.obs_rms.update(np.array(batch_successor_features))
+                    if self.neural:
+                        # assert len(observation) == self.timesteps_per_batch
+                        # Comment out if you want only the latest rewards:
+                        self.update_reward_counter = -10
+                        if done:
+                            obs_batch, acs_batch, gammas_batch = \
+                                features_buffer['obs'][self.update_reward_counter:],\
+                                features_buffer['acs'][self.update_reward_counter:],\
+                                features_buffer['gammas'][self.update_reward_counter:]
+                            batch_successor_features = episode_successor_features[self.update_reward_counter:]
+
                         else:
+                            obs_batch, acs_batch, gammas_batch = \
+                                features_buffer['obs'][self.update_reward_counter:-1],\
+                                features_buffer['acs'][self.update_reward_counter:-1],\
+                                features_buffer['gammas'][self.update_reward_counter:-1]
+                            batch_successor_features = episode_successor_features[self.update_reward_counter:-1]
+
+                        if self.reward_giver.normalize:
                             self.reward_giver.obs_rms.update(
                                 np.array(batch_successor_features)[:,:self.observation_space.shape[0]])
 
+                        for idx, (ob_batch, ac_batch, gamma_batch) in enumerate(zip(obs_batch, acs_batch, gammas_batch)):
 
-                    self.reward_giver.update_reward(policy_successor_features)
+                            rand_traj = np.random.randint(self.expert_dataset.num_traj)
+                            ob_expert, ac_expert, gamma_expert = self.expert_dataset.ep_obs[rand_traj],\
+                                                                 self.expert_dataset.ep_acs[rand_traj],\
+                                                                 self.expert_dataset.ep_gammas[rand_traj]
+
+                            ob_batch, ac_batch, gamma_batch = np.array(ob_batch), np.array(ac_batch), np.array(gamma_batch)
 
 
-                    self.update_reward_counter = 0
+                            with self.sess.as_default():
+                                self.reward_giver.train(ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
+                                                            ob_expert, ac_expert, np.expand_dims(gamma_expert, axis=1))
+
+                            #
+                            # # Reshape actions if needed when using discrete actions
+                            # if isinstance(self.action_space, gym.spaces.Discrete):
+                            #     if len(ac_batch.shape) == 2:
+                            #         ac_batch = ac_batch[:, 0]
+                            #     if len(ac_expert.shape) == 2:
+                            #         ac_expert = ac_expert[:, 0]
+
+                    else:
+                        # policy_successor_features = np.mean(episode_successor_features[-21:-1], axis=0)
+                        if done:
+                            batch_successor_features = episode_successor_features[self.update_reward_counter:]
+                        else:
+                            batch_successor_features = episode_successor_features[self.update_reward_counter:-1]
+
+                        policy_successor_features = np.mean(batch_successor_features, axis=0)
+                        if self.reward_giver.normalize:
+                            if self.reward_giver.is_action_features:
+                                self.reward_giver.obs_rms.update(np.array(batch_successor_features))
+                            else:
+                                self.reward_giver.obs_rms.update(
+                                    np.array(batch_successor_features)[:,:self.observation_space.shape[0]])
+
+                        self.reward_giver.update_reward(policy_successor_features)
+
+
+                        self.update_reward_counter = 0
 
 
 
@@ -662,14 +718,20 @@ class MDPO_OFF(OffPolicyRLModel):
                 episode_true_rewards[-1] += true_reward_
 
                 if done:
+
                     if self.action_noise is not None:
                         self.action_noise.reset()
                     if not isinstance(self.env, VecEnv):
                         obs = self.env.reset()
                     episode_rewards.append(0.0)
+                    true_reward_buffer.extend([episode_true_rewards[-1]])
                     episode_true_rewards.append(0.0)
 
                     episode_successor_features.append(np.zeros(self.n_features))
+                    features_buffer['obs'].append([])
+                    features_buffer['acs'].append([])
+                    features_buffer['gammas'].append([])
+
                     h_step = 0
                     self.update_reward_counter -= 1
                 else:
@@ -677,8 +739,12 @@ class MDPO_OFF(OffPolicyRLModel):
                         concat_obs_ = np.concatenate((obs_, action), axis=0)
                     else:
                         concat_obs_ = obs_
+
                     episode_successor_features[-1] = np.add(episode_successor_features[-1],
                                                             (1 - self.gamma) * (self.gamma ** h_step) * concat_obs_)
+                    features_buffer['obs'][-1].append(obs_)
+                    features_buffer['acs'][-1].append(action)
+                    features_buffer['gammas'][-1].append(self.gamma ** h_step)
 
                     h_step += 1
 
@@ -706,6 +772,7 @@ class MDPO_OFF(OffPolicyRLModel):
                     logger.logkv("mean 100 episode true reward", mean_true_reward)
                     if len(self.ep_info_buf) > 0 and len(self.ep_info_buf[0]) > 0:
                         logger.logkv('EpTrueRewMean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]))
+                        # logger.logkv('EpTrueRewMean', safe_mean(true_reward_buffer))
                         logger.logkv('eplenmean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]))
                     logger.logkv("n_updates", n_updates)
                     logger.logkv("current_lr", current_lr)

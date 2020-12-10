@@ -191,6 +191,7 @@ def mujoco_arg_parser():
     parser.add_argument('--play', default=False, action='store_true')
     parser.add_argument('--t-pi', type=float, default=float(0.5))
     parser.add_argument('--t-c', type=float, default=float(0.05))
+    parser.add_argument('--lam', type=float, default=float(0.98))
     parser.add_argument('--no-log', help='Not logging', default=False, action='store_true')
     parser.add_argument('--sgd-steps', type=int, default=int(10))
     parser.add_argument('--mdpo-update-steps', type=int, default=int(10))
@@ -204,7 +205,12 @@ def mujoco_arg_parser():
     parser.add_argument('--bonus-coef', type=float, default=float(0.0))
     parser.add_argument('--random-action-len', type=int, default=int(0))
     parser.add_argument('--num-seeds', type=int, default=int(1))
+    parser.add_argument('--seed-offset', type=int, default=int(0))
     parser.add_argument('--states', default=False, action='store_true')
+    parser.add_argument('--dir-name', type=str, default='')
+    parser.add_argument('--neural', default=False, action='store_true')
+
+
 
 
 

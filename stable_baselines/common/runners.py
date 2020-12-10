@@ -84,6 +84,9 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
     """
     # Check when using GAIL
     assert not (gail and reward_giver is None), "You must pass a reward giver when using GAIL"
+    assert not (mdal and reward_giver is None), "You must pass a reward giver when using MDAL"
+
+
 
     # Initialize state variables
     step = 0
@@ -102,6 +105,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
     # Initialize history arrays
     observations = np.array([observation for _ in range(horizon)])
     true_rewards = np.zeros(horizon, 'float32')
+    h_steps = np.zeros(horizon, 'float32')
     rewards = np.zeros(horizon, 'float32')
     vpreds = np.zeros(horizon, 'float32')
     episode_starts = np.zeros(horizon, 'bool')
@@ -111,7 +115,6 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
     episode_start = True  # marks if we're on first timestep of an episode
     done = False
     # covariance_lambda = np.identity(env.observation_space.shape[0])
-
     callback.on_rollout_start()
 
     while True:
@@ -127,13 +130,13 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
                 yield {
                         "observations": observations,
                         "rewards": rewards,
+                        "h_steps": h_steps,
                         "dones": dones,
                         "episode_starts": episode_starts,
                         "true_rewards": true_rewards,
                         "vpred": vpreds,
                         "actions": actions,
                         "nextvpred": vpred[0] * (1 - episode_start),
-                        # "nextvpred": vpred[0],
                         "ep_rets": ep_rets,
                         "ep_lens": ep_lens,
                         "ep_true_rets": ep_true_rets,
@@ -144,6 +147,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
                 yield {
                     "observations": observations,
                     "rewards": rewards,
+                    "h_steps": h_steps,
                     "dones": dones,
                     "episode_starts": episode_starts,
                     "true_rewards": true_rewards,
@@ -181,11 +185,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
             reward = reward_giver.get_reward(observation, clipped_action[0])
             observation, true_reward, done, info = env.step(clipped_action[0])
         elif mdal:
-            # reward = reward_giver.get_reward(observation, (step+1) * covariance_lambda)
-            # covariance_lambda = (step+1) / (step + 2) * covariance_lambda \
-            #                     + np.matmul(np.expand_dims(observation, axis=1), np.expand_dims(observation, axis=0))\
-            #                     / (step + 2)
-            reward = reward_giver.get_reward(observation)
+            reward = reward_giver.get_reward(observation, clipped_action[0])
             observation, true_reward, done, info = env.step(clipped_action[0])
         else:
             observation, reward, done, info = env.step(clipped_action[0])
@@ -199,6 +199,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
                     yield {
                         "observations": observations,
                         "rewards": rewards,
+                        "h_steps": h_steps,
                         "dones": dones,
                         "episode_starts": episode_starts,
                         "true_rewards": true_rewards,
@@ -215,6 +216,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
                     yield {
                         "observations": observations,
                         "rewards": rewards,
+                        "h_steps": h_steps,
                         "dones": dones,
                         "episode_starts": episode_starts,
                         "true_rewards": true_rewards,
@@ -231,6 +233,8 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
 
         rewards[i] = reward
         true_rewards[i] = true_reward
+        h_steps[i] = h_step
+
         dones[i] = done
         episode_start = done
 
@@ -242,7 +246,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
             # Retrieve unnormalized reward if using Monitor wrapper
             maybe_ep_info = info.get('episode')
             if maybe_ep_info is not None:
-                if not gail:
+                if not (gail or mdal):
                     cur_ep_ret = maybe_ep_info['r']
                 cur_ep_true_ret = maybe_ep_info['r']
             h_step = 0

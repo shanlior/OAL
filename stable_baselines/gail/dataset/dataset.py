@@ -64,6 +64,11 @@ class ExpertDataset(object):
         actions = traj_data['actions'][:traj_limit_idx]
         successor_features = traj_data['successor_features']
 
+        ep_obs = traj_data['ep_obs']
+        ep_acs = traj_data['ep_acs']
+        ep_gammas = traj_data['ep_gammas']
+
+
 
         # obs, actions: shape (N * L, ) + S
         # where N = # episodes, L = episode length
@@ -87,6 +92,9 @@ class ExpertDataset(object):
         self.observations = observations
         self.actions = actions
         self.successor_features = successor_features
+        self.ep_obs = ep_obs
+        self.ep_acs = ep_acs
+        self.ep_gammas = ep_gammas
 
         self.returns = traj_data['episode_returns'][:traj_limit_idx]
         self.avg_ret = sum(self.returns) / len(self.returns)

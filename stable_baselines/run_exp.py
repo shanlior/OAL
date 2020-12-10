@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # noinspection PyUnresolvedReferences
-from mpi4py import MPI
+# from mpi4py import MPI
 
 import stable_baselines.common.tf_util as tf_util
 from stable_baselines.common.vec_env.vec_normalize import VecNormalize
@@ -13,14 +13,14 @@ from stable_baselines.common.cmd_util import make_mujoco_env, mujoco_arg_parser
 from stable_baselines import bench, logger
 
 
-from stable_baselines.mdal import MDAL_MDPO_OFF
+from stable_baselines.mdal import MDAL_MDPO_OFF, MDAL_MDPO_ON, MDAL_TRPO
 from stable_baselines.gail import ExpertDataset, generate_expert_traj
 import os
 
 
-def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_path, pretrain, pretrain_epochs,
+def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, lam, log, expert_path, pretrain, pretrain_epochs,
           mdpo_update_steps, num_trajectories, expert_model, exploration_bonus, bonus_coef, random_action_len,
-          is_action_features):
+          is_action_features, dir_name, neural):
     """
     Train TRPO model for the mujoco environment, for testing purposes
     :param env_id: (str) Environment ID
@@ -32,8 +32,10 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
         from mpi4py import MPI
         rank = MPI.COMM_WORLD.Get_rank()
         env_name = env_id[:-3].lower()
-        log_dir = './experiments/' + env_name + '/' + str(algo).lower() + '/'
-        log_name = str(algo) + '_updateSteps' + str(mdpo_update_steps) + '_tpi' + str(t_pi) + '_tc' + str(t_c)
+        log_dir = './experiments/' + env_name + '/' + str(algo).lower() + '/'\
+                  + 'tpi' + str(t_pi) + '_tc' + str(t_c) + '_lam' + str(lam)
+        log_dir += '_' + dir_name + '/'
+        log_name = str(algo) + '_updateSteps' + str(mdpo_update_steps)
         # log_name += '_randLen' + str(random_action_len)
         if exploration_bonus:
             log_name += '_exploration' + str(bonus_coef)
@@ -104,7 +106,7 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
             from stable_baselines import SAC
             env = VecNormalize(env, norm_reward=False, norm_obs=False)
             model = SAC.load(expert_model, env)
-            generate_expert_traj(model, expert_path, n_timesteps=num_timesteps, n_episodes=100, evaluate=True)
+            generate_expert_traj(model, expert_path, n_timesteps=num_timesteps, n_episodes=10, evaluate=True)
         else:
             expert_path = expert_path + '.npz'
             dataset = ExpertDataset(expert_path=expert_path, traj_limitation=10, verbose=1)
@@ -112,11 +114,31 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, log, expert_p
             if algo == 'MDAL':
                 model = MDAL_MDPO_OFF('MlpPolicy', env, dataset, verbose=1,
                                       tensorboard_log="./experiments/" + env_name + "/mdal/", seed=seed,
-                                      buffer_size=1000000, ent_coef=1.0, learning_starts=10000, batch_size=256, tau=0.01,
+                                      buffer_size=1000000, ent_coef=0.0, learning_starts=10000, batch_size=256, tau=0.01,
                                       gamma=0.99, gradient_steps=sgd_steps, mdpo_update_steps=mdpo_update_steps,
                                       lam=0.0, train_freq=1, tsallis_q=1, reparameterize=True, t_pi=t_pi, t_c=t_c,
                                       exploration_bonus=exploration_bonus, bonus_coef=bonus_coef,
+                                      is_action_features=is_action_features,
+                                      neural=neural)
+            elif algo == 'MDAL_ON_POLICY':
+                model = MDAL_MDPO_ON('MlpPolicy', env, dataset, verbose=1,
+                                      tensorboard_log="./experiments/" + env_name + "/mdal_mdpo_on/", seed=seed,
+                                      max_kl=0.01, cg_iters=10, cg_damping=0.1, entcoeff=0.0, adversary_entcoeff=0.001,
+                                      gamma=0.99, lam=0.95, vf_iters=5, vf_stepsize=1e-3, sgd_steps=sgd_steps,
+                                      klcoeff=t_pi, method="multistep-SGD", tsallis_q=1.0,
+                                      t_pi=t_pi, t_c=t_c,
+                                      exploration_bonus=exploration_bonus, bonus_coef=bonus_coef,
+                                      is_action_features=is_action_features, neural=neural
+                                     )
+
+            elif algo == 'MDAL_TRPO':
+                model = MDAL_TRPO('MlpPolicy', env, dataset, verbose=1,
+                                      tensorboard_log="./experiments/" + env_name + "/mdal_trpo/", seed=seed,
+                                      gamma=0.99, lam=lam,
+                                      entcoeff=0.0, adversary_entcoeff=0.0, max_kl=t_pi, t_pi=t_pi, t_c=t_c,
+                                      exploration_bonus=exploration_bonus, bonus_coef=bonus_coef,
                                       is_action_features=is_action_features)
+
             elif algo == 'GAIL':
                 from mpi4py import MPI
                 from stable_baselines import GAIL
@@ -142,18 +164,29 @@ def main():
     """
     args = mujoco_arg_parser().parse_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
-    os.environ['OMP_NUM_THREADS'] = '2'
-    os.environ['OPENBLAS_NUM_THREADS'] = '2'
+    os.environ['OMP_NUM_THREADS'] = '1'
+    os.environ['OPENBLAS_NUM_THREADS'] = '1'
     log = not args.no_log
     is_action_features = not args.states
-    seed_offset = 0
-    for seed in range(args.num_seeds):
-        train(args.env, algo=args.algo, num_timesteps=args.num_timesteps, seed=(seed+seed_offset), sgd_steps=args.sgd_steps,
-              t_pi=args.t_pi, t_c=args.t_c, log=log, expert_path=args.expert_path,
-              pretrain=args.pretrain, pretrain_epochs=args.pretrain_epochs, mdpo_update_steps=args.mdpo_update_steps,
-              num_trajectories=args.num_trajectories, expert_model=args.expert_model,
-              exploration_bonus=args.exploration, bonus_coef=args.bonus_coef, random_action_len=args.random_action_len,
-              is_action_features=is_action_features)
+
+    t_cs = [0.1]
+    t_pis = [0.01]
+    lams = [0.98]
+    for t_c in t_cs:
+        for t_pi in t_pis:
+            for lam in lams:
+                args.lam = lam
+                args.t_c = t_c
+                args.t_pi = t_pi
+                for seed in range(args.num_seeds):
+                    train(args.env, algo=args.algo, num_timesteps=args.num_timesteps, seed=(seed+args.seed_offset),
+                          expert_model=args.expert_model, expert_path=args.expert_path, num_trajectories=args.num_trajectories,
+                          is_action_features=is_action_features,
+                          sgd_steps=args.sgd_steps, mdpo_update_steps=args.mdpo_update_steps,
+                          t_pi=args.t_pi, t_c=args.t_c, lam=args.lam, log=log,
+                          pretrain=args.pretrain, pretrain_epochs=args.pretrain_epochs,
+                          exploration_bonus=args.exploration, bonus_coef=args.bonus_coef,
+                          random_action_len=args.random_action_len, dir_name=args.dir_name, neural=args.neural)
 
 
 if __name__ == '__main__':

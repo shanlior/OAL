@@ -50,7 +50,7 @@ class TRPO(ActorCriticRLModel):
     def __init__(self, policy, env, gamma=0.99, timesteps_per_batch=1024, max_kl=0.01, cg_iters=10, lam=0.98,
                  entcoeff=0.0, cg_damping=1e-2, vf_stepsize=3e-4, vf_iters=3, verbose=0, tensorboard_log=None,
                  _init_setup_model=True, policy_kwargs=None, full_tensorboard_log=False,
-                 seed=None, n_cpu_tf_sess=1):
+                 seed=None, n_cpu_tf_sess=1, t_pi=0.5, t_c=0.05):
         super(TRPO, self).__init__(policy=policy, env=env, verbose=verbose, requires_vec_env=False,
                                    _init_setup_model=_init_setup_model, policy_kwargs=policy_kwargs,
                                    seed=seed, n_cpu_tf_sess=n_cpu_tf_sess)
@@ -73,7 +73,7 @@ class TRPO(ActorCriticRLModel):
         self.hidden_size_adversary = 100
         self.adversary_entcoeff = 1e-3
         self.expert_dataset = None
-        self.g_step = 1
+        self.g_step = 3
         self.d_step = 1
         self.d_stepsize = 3e-4
 
@@ -101,6 +101,10 @@ class TRPO(ActorCriticRLModel):
         self.params = None
         self.summary = None
 
+        # MDAL parameters
+        self.t_pi = t_pi
+        self.t_c = t_c
+
         if _init_setup_model:
             self.setup_model()
 
@@ -114,7 +118,7 @@ class TRPO(ActorCriticRLModel):
     def setup_model(self):
         # prevent import loops
         from stable_baselines.gail.adversary import TransitionClassifier
-        from stable_baselines.mdal.adversary import TabularAdversary
+        from stable_baselines.mdal.adversary import TabularAdversaryTF, NeuralAdversary
 
         with SetVerbosity(self.verbose):
 
@@ -134,13 +138,19 @@ class TRPO(ActorCriticRLModel):
                     self.reward_giver = TransitionClassifier(self.observation_space, self.action_space,
                                                              self.hidden_size_adversary,
                                                              entcoeff=self.adversary_entcoeff)
-                if self.using_mdal:
-                    self.reward_giver = TabularAdversary(self.observation_space, self.action_space,
-                                                             self.hidden_size_adversary,
-                                                             entcoeff=self.adversary_entcoeff,
-                                                             expert_features=self.expert_dataset.successor_features,
-                                                             exploration_bonus=self.exploration_bonus,
-                                                             bonus_coef=self.bonus_coef)
+                elif self.using_mdal:
+                    if self.neural:
+                        self.reward_giver = NeuralAdversary(self.sess, self.observation_space, self.action_space,
+                                                            self.hidden_size_adversary)
+                    else:
+                        self.reward_giver = TabularAdversaryTF(self.sess, self.observation_space, self.action_space,
+                                                                 self.hidden_size_adversary,
+                                                                 entcoeff=self.adversary_entcoeff,
+                                                                 expert_features=self.expert_dataset.successor_features,
+                                                                 exploration_bonus=self.exploration_bonus,
+                                                                 bonus_coef=self.bonus_coef,
+                                                                 t_c=self.t_c,
+                                                                 is_action_features=self.is_action_features)
 
                 # Construct network for new policy
                 self.policy_pi = self.policy(self.sess, self.observation_space, self.action_space, self.n_envs, 1,
@@ -217,11 +227,11 @@ class TRPO(ActorCriticRLModel):
                     @contextmanager
                     def timed(msg):
                         if self.rank == 0 and self.verbose >= 1:
-                            print(colorize(msg, color='magenta'))
-                            start_time = time.time()
+                            # print(colorize(msg, color='magenta'))
+                            # start_time = time.time()
                             yield
-                            print(colorize("done in {:.3f} seconds".format((time.time() - start_time)),
-                                           color='magenta'))
+                            # print(colorize("done in {:.3f} seconds".format((time.time() - start_time)),
+                            #                color='magenta'))
                         else:
                             yield
 
@@ -269,7 +279,7 @@ class TRPO(ActorCriticRLModel):
                 self.initial_state = self.policy_pi.initial_state
 
                 self.params = tf_util.get_trainable_vars("model") + tf_util.get_trainable_vars("oldpi")
-                if self.using_gail:
+                if self.using_gail or (self.using_mdal and self.neural):
                     self.params.extend(self.reward_giver.get_trainable_variables())
 
                 self.summary = tf.summary.merge_all()
@@ -295,11 +305,10 @@ class TRPO(ActorCriticRLModel):
 
             with self.sess.as_default():
                 callback.on_training_start(locals(), globals())
-
                 seg_gen = traj_segment_generator(self.policy_pi, self.env, self.timesteps_per_batch,
-                                                 reward_giver=self.reward_giver,
-                                                 gail=self.using_gail, mdal=self.using_mdal,
-                                                 action_space=self.action_space, callback=callback)
+                                                     reward_giver=self.reward_giver,
+                                                     gail=self.using_gail, mdal=self.using_mdal,
+                                                     action_space=self.action_space, callback=callback)
 
                 episodes_so_far = 0
                 timesteps_so_far = 0
@@ -320,6 +329,9 @@ class TRPO(ActorCriticRLModel):
                     #  d_loss_stats = Stats(reward_giver.loss_name)
                     #  ep_stats = Stats(["True_rewards", "Rewards", "Episode_length"])
 
+                d_step = 0
+                policy_successor_features = None
+
                 while True:
                     if timesteps_so_far >= total_timesteps:
                         break
@@ -330,7 +342,7 @@ class TRPO(ActorCriticRLModel):
                         return self.allmean(self.compute_fvp(vec, *fvpargs, sess=self.sess)) + self.cg_damping * vec
 
                     # ------------------ Update G ------------------
-                    logger.log("Optimizing Policy...")
+                    # logger.log("Optimizing Policy...")
                     # g_step = 1 when not using GAIL
                     mean_losses = None
                     vpredbefore = None
@@ -341,13 +353,22 @@ class TRPO(ActorCriticRLModel):
                     for k in range(self.g_step):
                         with self.timed("sampling"):
                             seg = seg_gen.__next__()
-
                         # Stop training early (triggered by the callback)
                         if not seg.get('continue_training', True):  # pytype: disable=attribute-error
                             break
 
+                        if self.using_mdal:
+                            curr_successor_features = add_successor_features(seg, self.gamma,
+                                                                               is_action_features=self.is_action_features)
+                            curr_successor_features = np.expand_dims(curr_successor_features, axis=0)
+                            if policy_successor_features is None:
+                                policy_successor_features = curr_successor_features
+                            else:
+                                policy_successor_features = np.concatenate((policy_successor_features,
+                                                                            curr_successor_features), axis=0)
                         add_vtarg_and_adv(seg, self.gamma, self.lam)
-                        policy_successor_features = add_successor_features(seg, self.gamma)
+
+
                         # ob, ac, atarg, ret, td1ret = map(np.concatenate, (obs, acs, atargs, rets, td1rets))
                         observation, action = seg["observations"], seg["actions"]
                         atarg, tdlamret = seg["adv"], seg["tdlamret"]
@@ -413,19 +434,22 @@ class TRPO(ActorCriticRLModel):
                                 mean_losses = surr, kl_loss, *_ = self.allmean(
                                     np.array(self.compute_losses(*args, sess=self.sess)))
                                 improve = surr - surrbefore
-                                logger.log("Expected: %.3f Actual: %.3f" % (expectedimprove, improve))
+                                # logger.log("Expected: %.3f Actual: %.3f" % (expectedimprove, improve))
                                 if not np.isfinite(mean_losses).all():
-                                    logger.log("Got non-finite value of losses -- bad!")
+                                    # logger.log("Got non-finite value of losses -- bad!")
+                                    improve = surr - surrbefore
                                 elif kl_loss > self.max_kl * 1.5:
-                                    logger.log("violated KL constraint. shrinking step.")
+                                    # logger.log("violated KL constraint. shrinking step.")
+                                    improve = surr - surrbefore
                                 elif improve < 0:
-                                    logger.log("surrogate didn't improve. shrinking step.")
+                                    # logger.log("surrogate didn't improve. shrinking step.")
+                                    improve = surr - surrbefore
                                 else:
-                                    logger.log("Stepsize OK!")
+                                    # logger.log("Stepsize OK!")
                                     break
                                 stepsize *= .5
                             else:
-                                logger.log("couldn't compute a good step")
+                                # logger.log("couldn't compute a good step")
                                 self.set_from_flat(thbefore)
                             if self.nworkers > 1 and iters_so_far % 20 == 0:
                                 # list of tuples
@@ -452,54 +476,110 @@ class TRPO(ActorCriticRLModel):
                     logger.record_tabular("explained_variance_tdlam_before",
                                           explained_variance(vpredbefore, tdlamret))
 
-                    if self.using_gail:
-                        # ------------------ Update D ------------------
-                        logger.log("Optimizing Discriminator...")
-                        logger.log(fmt_row(13, self.reward_giver.loss_name))
-                        assert len(observation) == self.timesteps_per_batch
-                        batch_size = self.timesteps_per_batch // self.d_step
+                    d_step += 1
 
-                        # NOTE: uses only the last g step for observation
-                        d_losses = []  # list of tuples, each of which gives the loss for a minibatch
-                        # NOTE: for recurrent policies, use shuffle=False?
-                        for ob_batch, ac_batch in dataset.iterbatches((observation, action),
-                                                                      include_final_partial_batch=False,
-                                                                      batch_size=batch_size,
-                                                                      shuffle=True):
-                            ob_expert, ac_expert = self.expert_dataset.get_next_batch()
-                            # update running mean/std for reward_giver
-                            if self.reward_giver.normalize:
-                                self.reward_giver.obs_rms.update(np.concatenate((ob_batch, ob_expert), 0))
+                    if d_step == self.d_step:
+                        d_step = 0
 
-                            # Reshape actions if needed when using discrete actions
-                            if isinstance(self.action_space, gym.spaces.Discrete):
-                                if len(ac_batch.shape) == 2:
-                                    ac_batch = ac_batch[:, 0]
-                                if len(ac_expert.shape) == 2:
-                                    ac_expert = ac_expert[:, 0]
-                            *newlosses, grad = self.reward_giver.lossandgrad(ob_batch, ac_batch, ob_expert, ac_expert)
-                            self.d_adam.update(self.allmean(grad), self.d_stepsize)
-                            d_losses.append(newlosses)
-                        logger.log(fmt_row(13, np.mean(d_losses, axis=0)))
+                        if self.using_gail:
+                            # ------------------ Update D ------------------
+                            logger.log("Optimizing Discriminator...")
+                            logger.log(fmt_row(13, self.reward_giver.loss_name))
+                            assert len(observation) == self.timesteps_per_batch
+                            batch_size = self.timesteps_per_batch // self.d_step
 
-                        # lr: lengths and rewards
+                            # NOTE: uses only the last g step for observation
+                            d_losses = []  # list of tuples, each of which gives the loss for a minibatch
+                            # NOTE: for recurrent policies, use shuffle=False?
+                            for ob_batch, ac_batch in dataset.iterbatches((observation, action),
+                                                                          include_final_partial_batch=False,
+                                                                          batch_size=batch_size,
+                                                                          shuffle=True):
+                                ob_expert, ac_expert = self.expert_dataset.get_next_batch()
+                                # update running mean/std for reward_giver
+                                if self.reward_giver.normalize:
+                                    self.reward_giver.obs_rms.update(np.concatenate((ob_batch, ob_expert), 0))
 
-                        lr_local = (seg["ep_lens"], seg["ep_rets"], seg["ep_true_rets"])  # local values
-                        list_lr_pairs = MPI.COMM_WORLD.allgather(lr_local)  # list of tuples
-                        lens, rews, true_rets = map(flatten_lists, zip(*list_lr_pairs))
-                        true_reward_buffer.extend(true_rets)
-                    elif self.using_mdal:
+                                # Reshape actions if needed when using discrete actions
+                                if isinstance(self.action_space, gym.spaces.Discrete):
+                                    if len(ac_batch.shape) == 2:
+                                        ac_batch = ac_batch[:, 0]
+                                    if len(ac_expert.shape) == 2:
+                                        ac_expert = ac_expert[:, 0]
+                                *newlosses, grad = self.reward_giver.lossandgrad(ob_batch, ac_batch, ob_expert, ac_expert)
+                                self.d_adam.update(self.allmean(grad), self.d_stepsize)
+                                d_losses.append(newlosses)
+                            logger.log(fmt_row(13, np.mean(d_losses, axis=0)))
 
-                        logger.log("Optimizing Rewards...")
-                        self.reward_giver.update_reward(policy_successor_features)
+                        elif self.using_mdal:
 
+                            if self.neural:
+                                # assert len(observation) == self.timesteps_per_batch
+                                # Comment out if you want only the latest rewards:
+                                self.update_reward_counter = -10
+                                if done:
+                                    obs_batch, acs_batch, gammas_batch = \
+                                        features_buffer['obs'][self.update_reward_counter:], \
+                                        features_buffer['acs'][self.update_reward_counter:], \
+                                        features_buffer['gammas'][self.update_reward_counter:]
+                                    batch_successor_features = episode_successor_features[self.update_reward_counter:]
+
+                                else:
+                                    obs_batch, acs_batch, gammas_batch = \
+                                        features_buffer['obs'][self.update_reward_counter:-1], \
+                                        features_buffer['acs'][self.update_reward_counter:-1], \
+                                        features_buffer['gammas'][self.update_reward_counter:-1]
+                                    batch_successor_features = episode_successor_features[self.update_reward_counter:-1]
+
+                                if self.reward_giver.normalize:
+                                    self.reward_giver.obs_rms.update(
+                                        np.array(batch_successor_features)[:, :self.observation_space.shape[0]])
+
+                                for idx, (ob_batch, ac_batch, gamma_batch) in enumerate(
+                                        zip(obs_batch, acs_batch, gammas_batch)):
+                                    rand_traj = np.random.randint(self.expert_dataset.num_traj)
+                                    ob_expert, ac_expert, gamma_expert = self.expert_dataset.ep_obs[rand_traj], \
+                                                                         self.expert_dataset.ep_acs[rand_traj], \
+                                                                         self.expert_dataset.ep_gammas[rand_traj]
+
+                                    ob_batch, ac_batch, gamma_batch = np.array(ob_batch), np.array(ac_batch), np.array(
+                                        gamma_batch)
+
+                                    with self.sess.as_default():
+                                        self.reward_giver.train(ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
+                                                                ob_expert, ac_expert,
+                                                                np.expand_dims(gamma_expert, axis=1))
+
+                                    #
+                                    # # Reshape actions if needed when using discrete actions
+                                    # if isinstance(self.action_space, gym.spaces.Discrete):
+                                    #     if len(ac_batch.shape) == 2:
+                                    #         ac_batch = ac_batch[:, 0]
+                                    #     if len(ac_expert.shape) == 2:
+                                    #         ac_expert = ac_expert[:, 0]
+
+                            else:
+
+                                policy_successor_features_mean = np.mean(policy_successor_features, axis=0)
+
+                                if self.reward_giver.normalize:
+                                    self.reward_giver.obs_rms.update(policy_successor_features_mean)
+
+                                self.reward_giver.update_reward(policy_successor_features_mean)
+
+                                policy_successor_features = None
+
+
+
+
+
+                    if self.using_gail or self.using_mdal:
                         # lr: lengths and rewards
                         lr_local = (seg["ep_lens"], seg["ep_rets"], seg["ep_true_rets"])  # local values
                         list_lr_pairs = MPI.COMM_WORLD.allgather(lr_local)  # list of tuples
                         lens, rews, true_rets = map(flatten_lists, zip(*list_lr_pairs))
                         true_reward_buffer.extend(true_rets)
                     else:
-                        # lr: lengths and rewards
                         lr_local = (seg["ep_lens"], seg["ep_rets"])  # local values
                         list_lr_pairs = MPI.COMM_WORLD.allgather(lr_local)  # list of tuples
                         lens, rews = map(flatten_lists, zip(*list_lr_pairs))
@@ -509,8 +589,8 @@ class TRPO(ActorCriticRLModel):
                     if len(len_buffer) > 0:
                         logger.record_tabular("EpLenMean", np.mean(len_buffer))
                         logger.record_tabular("EpRewMean", np.mean(reward_buffer))
-                    if self.using_gail or self.using_mdal:
-                        logger.record_tabular("EpTrueRewMean", np.mean(true_reward_buffer))
+                        if self.using_gail or self.using_mdal:
+                            logger.record_tabular("EpTrueRewMean", np.mean(true_reward_buffer))
                     logger.record_tabular("EpThisIter", len(lens))
                     episodes_so_far += len(lens)
                     current_it_timesteps = MPI.COMM_WORLD.allreduce(seg["total_timestep"])
@@ -519,8 +599,11 @@ class TRPO(ActorCriticRLModel):
                     iters_so_far += 1
 
                     logger.record_tabular("EpisodesSoFar", episodes_so_far)
-                    # logger.record_tabular("TimestepsSoFar", self.num_timesteps)
                     logger.record_tabular("steps", self.num_timesteps)
+                    logger.record_tabular("t_c", self.t_c)
+                    logger.record_tabular("t_pi", self.t_pi)
+
+
                     logger.record_tabular("seed", self.seed)
 
                     logger.record_tabular("TimeElapsed", time.time() - t_start)
