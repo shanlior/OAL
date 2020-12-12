@@ -139,6 +139,7 @@ class TRPO(ActorCriticRLModel):
                                                              self.hidden_size_adversary,
                                                              entcoeff=self.adversary_entcoeff)
                 elif self.using_mdal:
+
                     if self.neural:
                         self.reward_giver = NeuralAdversary(self.sess, self.observation_space, self.action_space,
                                                             self.hidden_size_adversary)
@@ -307,7 +308,8 @@ class TRPO(ActorCriticRLModel):
                 callback.on_training_start(locals(), globals())
                 seg_gen = traj_segment_generator(self.policy_pi, self.env, self.timesteps_per_batch,
                                                      reward_giver=self.reward_giver,
-                                                     gail=self.using_gail, mdal=self.using_mdal,
+                                                     gail=self.using_gail, mdal=self.using_mdal, neural=self.neural,
+                                                     gamma=self.gamma,
                                                      action_space=self.action_space, callback=callback)
 
                 episodes_so_far = 0
@@ -357,15 +359,15 @@ class TRPO(ActorCriticRLModel):
                         if not seg.get('continue_training', True):  # pytype: disable=attribute-error
                             break
 
-                        if self.using_mdal:
-                            curr_successor_features = add_successor_features(seg, self.gamma,
-                                                                               is_action_features=self.is_action_features)
-                            curr_successor_features = np.expand_dims(curr_successor_features, axis=0)
-                            if policy_successor_features is None:
-                                policy_successor_features = curr_successor_features
-                            else:
-                                policy_successor_features = np.concatenate((policy_successor_features,
-                                                                            curr_successor_features), axis=0)
+                        # if self.using_mdal:
+                        #     curr_successor_features = add_successor_features(seg, self.gamma,
+                        #                                                        is_action_features=self.is_action_features)
+                        #     curr_successor_features = np.expand_dims(curr_successor_features, axis=0)
+                        #     if policy_successor_features is None:
+                        #         policy_successor_features = curr_successor_features
+                        #     else:
+                        #         policy_successor_features = np.concatenate((policy_successor_features,
+                        #                                                     curr_successor_features), axis=0)
                         add_vtarg_and_adv(seg, self.gamma, self.lam)
 
 
@@ -516,20 +518,9 @@ class TRPO(ActorCriticRLModel):
                             if self.neural:
                                 # assert len(observation) == self.timesteps_per_batch
                                 # Comment out if you want only the latest rewards:
-                                self.update_reward_counter = -10
-                                if done:
-                                    obs_batch, acs_batch, gammas_batch = \
-                                        features_buffer['obs'][self.update_reward_counter:], \
-                                        features_buffer['acs'][self.update_reward_counter:], \
-                                        features_buffer['gammas'][self.update_reward_counter:]
-                                    batch_successor_features = episode_successor_features[self.update_reward_counter:]
+                                obs_batch, acs_batch, gammas_batch = seg['obs_batch'], seg['acs_batch'], seg['gammas_batch']
+                                batch_successor_features = seg['successor_features_batch']
 
-                                else:
-                                    obs_batch, acs_batch, gammas_batch = \
-                                        features_buffer['obs'][self.update_reward_counter:-1], \
-                                        features_buffer['acs'][self.update_reward_counter:-1], \
-                                        features_buffer['gammas'][self.update_reward_counter:-1]
-                                    batch_successor_features = episode_successor_features[self.update_reward_counter:-1]
 
                                 if self.reward_giver.normalize:
                                     self.reward_giver.obs_rms.update(
@@ -559,11 +550,20 @@ class TRPO(ActorCriticRLModel):
                                     #         ac_expert = ac_expert[:, 0]
 
                             else:
-
-                                policy_successor_features_mean = np.mean(policy_successor_features, axis=0)
+                                obs_batch, acs_batch, gammas_batch = seg['obs_batch'], seg['acs_batch'], seg['gammas_batch']
+                                batch_successor_features = seg['successor_features_batch']
+                                policy_successor_features_mean = np.mean(batch_successor_features, axis=0)
 
                                 if self.reward_giver.normalize:
-                                    self.reward_giver.obs_rms.update(policy_successor_features_mean)
+                                    # self.reward_giver.obs_rms.update(
+                                    #     np.array(batch_successor_features)[:, :self.observation_space.shape[0]])
+                                    self.reward_giver.obs_rms.update(np.array(batch_successor_features))
+
+
+                                # policy_successor_features_mean = np.mean(policy_successor_features, axis=0)
+
+                                # if self.reward_giver.normalize:
+                                #     self.reward_giver.obs_rms.update(policy_successor_features_mean)
 
                                 self.reward_giver.update_reward(policy_successor_features_mean)
 

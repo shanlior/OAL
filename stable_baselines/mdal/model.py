@@ -41,17 +41,18 @@ class MDAL_TRPO(TRPO):
     #              g_step=5, d_step=1, d_stepsize=3e-4, verbose=0,
     #              _init_setup_model=True, **kwargs):
     def __init__(self, policy, env, expert_dataset=None,
-                 hidden_size_adversary=100, adversary_entcoeff=0, timesteps_per_batch=2000,
-                 g_step=1, d_step=1, d_stepsize=3e-4, verbose=0,
-                 _init_setup_model=True, exploration_bonus=False, bonus_coef=0.01, is_action_features=True, **kwargs):
-        super().__init__(policy, env, verbose=verbose, _init_setup_model=False, neural=False, **kwargs)
+                 hidden_size_adversary=100, adversary_entcoeff=0, # timesteps_per_batch=2000,
+                 g_step=3, d_step=1, d_stepsize=3e-4, verbose=0,
+                 _init_setup_model=True, exploration_bonus=False, bonus_coef=0.01, is_action_features=True,
+                 neural=False, **kwargs):
+        super().__init__(policy, env, verbose=verbose, _init_setup_model=False, **kwargs)
         self.using_mdal = True
         self.expert_dataset = expert_dataset
         self.g_step = g_step
         self.d_step = d_step
         self.d_stepsize = d_stepsize
         self.hidden_size_adversary = hidden_size_adversary
-        self.timesteps_per_batch = timesteps_per_batch
+        # self.timesteps_per_batch = timesteps_per_batch
         self.adversary_entcoeff = adversary_entcoeff
         self.exploration_bonus = exploration_bonus
         self.bonus_coef = bonus_coef
@@ -118,6 +119,8 @@ class MDAL_MDPO_ON(MDPO_ON):
         self.exploration_bonus = exploration_bonus
         self.bonus_coef = bonus_coef
         self.is_action_features = is_action_features
+        self.observation_space = env.observation_space
+        self.action_space = env.action_space
 
         if _init_setup_model:
             self.setup_model()

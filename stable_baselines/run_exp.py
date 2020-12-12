@@ -137,7 +137,7 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, lam, log, exp
                                       gamma=0.99, lam=lam,
                                       entcoeff=0.0, adversary_entcoeff=0.0, max_kl=t_pi, t_pi=t_pi, t_c=t_c,
                                       exploration_bonus=exploration_bonus, bonus_coef=bonus_coef,
-                                      is_action_features=is_action_features)
+                                      is_action_features=is_action_features, neural=neural)
 
             elif algo == 'GAIL':
                 from mpi4py import MPI
@@ -169,23 +169,21 @@ def main():
     log = not args.no_log
     is_action_features = not args.states
 
-    t_cs = [0.1]
-    t_pis = [0.01]
-    lams = [0.98]
-    for t_c in t_cs:
-        for t_pi in t_pis:
-            for lam in lams:
-                args.lam = lam
-                args.t_c = t_c
-                args.t_pi = t_pi
-                for seed in range(args.num_seeds):
-                    train(args.env, algo=args.algo, num_timesteps=args.num_timesteps, seed=(seed+args.seed_offset),
-                          expert_model=args.expert_model, expert_path=args.expert_path, num_trajectories=args.num_trajectories,
-                          is_action_features=is_action_features,
-                          sgd_steps=args.sgd_steps, mdpo_update_steps=args.mdpo_update_steps,
-                          t_pi=args.t_pi, t_c=args.t_c, lam=args.lam, log=log,
-                          pretrain=args.pretrain, pretrain_epochs=args.pretrain_epochs,
-                          exploration_bonus=args.exploration, bonus_coef=args.bonus_coef,
+
+    # for t_c in t_cs:
+    #     for t_pi in t_pis:
+    #         for lam in lams:
+    #             args.lam = lam
+    #             args.t_c = t_c
+    #             args.t_pi = t_pi
+    for seed in range(args.num_seeds):
+        train(args.env, algo=args.algo, num_timesteps=args.num_timesteps, seed=(seed+args.seed_offset),
+              expert_model=args.expert_model, expert_path=args.expert_path, num_trajectories=args.num_trajectories,
+              is_action_features=is_action_features,
+              sgd_steps=args.sgd_steps, mdpo_update_steps=args.mdpo_update_steps,
+              t_pi=args.t_pi, t_c=args.t_c, lam=args.lam, log=log,
+              pretrain=args.pretrain, pretrain_epochs=args.pretrain_epochs,
+              exploration_bonus=args.exploration, bonus_coef=args.bonus_coef,
                           random_action_len=args.random_action_len, dir_name=args.dir_name, neural=args.neural)
 
 

@@ -1006,6 +1006,7 @@ class OffPolicyRLModel(BaseRLModel):
         kwargs = dict(info=info)
         self.replay_buffer.add(obs_t, action, reward, obs_tp1, float(done), **kwargs)
 
+
     @abstractmethod
     def setup_model(self):
         pass

@@ -122,6 +122,10 @@ for env_id in sorted(data.keys()):
     for algo in sorted(data[env_id].keys()):
         legend_entries.append(algo)
         xs, ys = zip(*data[env_id][algo])
+        # makes sure all trajectories are of the same length (comment out if not required)
+        min_len = np.min([l.shape[0] for l in xs])
+        xs, ys = [x[:min_len] for x in xs], [y[:min_len] for y in ys]
+
         xs, ys = pad(xs), pad(ys)
         assert xs.shape == ys.shape
         x_max = np.max(xs) / 1e6

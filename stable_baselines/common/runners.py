@@ -56,8 +56,8 @@ class AbstractEnvRunner(ABC):
         raise NotImplementedError
 
 
-def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, mdal=False, callback=None,
-                           action_space=None):
+def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, mdal=False, neural=False, gamma=0.99,
+                           callback=None, action_space=None):
     """
     Compute target value using TD(lambda) estimator, and advantage with GAE(lambda)
     :param policy: (MLPPolicy) the policy
@@ -101,6 +101,12 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
     ep_true_rets = []
     ep_rets = []  # returns of completed episodes in this segment
     ep_lens = []  # Episode lengths
+    features_buffer = {}
+    features_buffer['obs'], features_buffer['acs'], features_buffer['gammas'] = [[]], [[]], [[]]
+    update_reward_counter = -11
+    n_features = len(observation) + len(action)
+    episode_successor_features = [np.zeros(n_features)]
+
 
     # Initialize history arrays
     observations = np.array([observation for _ in range(horizon)])
@@ -142,6 +148,10 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
                         "ep_true_rets": ep_true_rets,
                         "total_timestep": current_it_len,
                         'continue_training': True,
+                        "obs_batch": features_buffer['obs'][update_reward_counter:-1],
+                        "acs_batch": features_buffer['acs'][update_reward_counter:-1],
+                        "gammas_batch": features_buffer['gammas'][update_reward_counter:-1],
+                        "successor_features_batch": episode_successor_features[update_reward_counter:-1]
                 }
             else:
                 yield {
@@ -211,6 +221,10 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
                         "ep_true_rets": ep_true_rets,
                         "total_timestep": current_it_len,
                         'continue_training': False,
+                        "obs_batch": features_buffer['obs'][update_reward_counter:-1],
+                        "acs_batch": features_buffer['acs'][update_reward_counter:-1],
+                        "gammas_batch": features_buffer['gammas'][update_reward_counter:-1],
+                        "successor_features_batch": episode_successor_features[update_reward_counter:-1]
                     }
                 else:
                     yield {
@@ -242,6 +256,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
         cur_ep_true_ret += true_reward
         current_it_len += 1
         current_ep_len += 1
+
         if done:
             # Retrieve unnormalized reward if using Monitor wrapper
             maybe_ep_info = info.get('episode')
@@ -250,6 +265,11 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
                     cur_ep_ret = maybe_ep_info['r']
                 cur_ep_true_ret = maybe_ep_info['r']
             h_step = 0
+            if mdal:
+                episode_successor_features.append(np.zeros(n_features))
+                features_buffer['obs'].append([])
+                features_buffer['acs'].append([])
+                features_buffer['gammas'].append([])
 
             ep_rets.append(cur_ep_ret)
             ep_true_rets.append(cur_ep_true_ret)
@@ -260,5 +280,14 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
             if not isinstance(env, VecEnv):
                 observation = env.reset()
         else:
+            if mdal:
+
+                concat_obs = np.concatenate((observation, action[0]), axis=0)
+                episode_successor_features[-1] = np.add(episode_successor_features[-1],
+                                                        (1 - gamma) * (gamma ** h_step) * concat_obs)
+                features_buffer['obs'][-1].append(observation)
+                features_buffer['acs'][-1].append(action[0])
+                features_buffer['gammas'][-1].append(gamma ** h_step)
             h_step += 1
+
         step += 1
