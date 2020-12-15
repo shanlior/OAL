@@ -364,10 +364,10 @@ class MDPO_OFF(OffPolicyRLModel):
                     # (has to be separate from value train op, because min_qf_pi appears in policy_loss)
                     # policy_optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph)
                     policy_optimizer = tf.train.AdamOptimizer(learning_rate=3e-4)
-                    grads, vars = zip(*policy_optimizer.compute_gradients(policy_loss, var_list=tf_util.get_trainable_vars('model/pi')))
-                    grads, norm = tf.clip_by_global_norm(grads, 100.0)
-                    policy_train_op = policy_optimizer.apply_gradients(zip(grads, vars))
-                    # policy_train_op = policy_optimizer.minimize(policy_loss, var_list=tf_util.get_trainable_vars('model/pi'))
+                    # grads, vars = zip(*policy_optimizer.compute_gradients(policy_loss, var_list=tf_util.get_trainable_vars('model/pi')))
+                    # grads, norm = tf.clip_by_global_norm(grads, 100.0)
+                    # policy_train_op = policy_optimizer.apply_gradients(zip(grads, vars))
+                    policy_train_op = policy_optimizer.minimize(policy_loss, var_list=tf_util.get_trainable_vars('model/pi'))
 
                     # Value train op
                     # value_optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph)
@@ -678,7 +678,7 @@ class MDPO_OFF(OffPolicyRLModel):
                                                                  self.expert_dataset.ep_acs[rand_traj],\
                                                                  self.expert_dataset.ep_gammas[rand_traj]
 
-                            ob_batch, ac_batch, gamma_batch = np.array(ob_batch), np.array(ac_batch), np.array(gamma_batch)
+                            ob_batch, ac_batch, gamma_batch = np.array(ob_batch), np.array(ac_batch), (1-self.gamma) * np.array(gamma_batch)
 
 
                             with self.sess.as_default():
