@@ -340,12 +340,14 @@ class NeuralAdversary(object):
         self.expert_gammas_ph = tf.placeholder(tf.float32, (None, 1), name="gammas_ph")
 
         # Build graph
-        generator_reward = self.build_graph(self.generator_obs_ph, self.generator_acs_ph, reuse=False)
-        expert_reward = self.build_graph(self.expert_obs_ph, self.expert_acs_ph, reuse=True)
+        generator_rewards = self.build_graph(self.generator_obs_ph, self.generator_acs_ph, reuse=False)
+        expert_rewards = self.build_graph(self.expert_obs_ph, self.expert_acs_ph, reuse=True)
 
-        generator_scaled_rewards = tf.multiply(generator_reward, self.generator_gammas_ph)
+        generator_scaled_rewards = tf.multiply(generator_rewards, self.generator_gammas_ph)
+        # generator_scaled_rewards = generator_rewards
         generator_value = tf.reduce_sum(generator_scaled_rewards)
-        expert_scaled_rewards = tf.multiply(expert_reward, self.expert_gammas_ph)
+        expert_scaled_rewards = tf.multiply(expert_rewards, self.expert_gammas_ph)
+        # expert_scaled_rewards = expert_rewards
         expert_value = tf.reduce_sum(expert_scaled_rewards)
 
         loss = generator_value - expert_value
@@ -355,11 +357,19 @@ class NeuralAdversary(object):
         self.loss_name = ["generator_loss", "expert_loss", "entropy", "entropy_loss", "generator_acc", "expert_acc"]
         # self.total_loss = loss
         # Build Reward for policy
-        self.reward_op = tf.stop_gradient(generator_reward)
+        self.reward_op = tf.stop_gradient(generator_rewards)
 
         var_list = self.get_trainable_variables()
         rewards_optimizer = tf.train.AdamOptimizer(learning_rate=3e-4)
-        rewards_train_op = rewards_optimizer.minimize(loss, var_list=var_list)
+        grads, vars = zip(*rewards_optimizer.compute_gradients(loss, var_list=var_list))
+        # grads, vars = list(zip(*grads_and_vars))
+        # grads, norm = tf.clip_by_global_norm(grads, 300.0)
+        rewards_train_op = rewards_optimizer.apply_gradients(zip(grads, vars))
+        norm = tf.constant(0.)
+        # rewards_train_op = rewards_optimizer.minimize(loss, var_list=var_list)
+
+        rewards_train_op = [rewards_train_op, norm]
+
         self.train = tf_util.function(
             [self.generator_obs_ph, self.generator_acs_ph, self.generator_gammas_ph,
              self.expert_obs_ph, self.expert_acs_ph, self.expert_gammas_ph], rewards_train_op)

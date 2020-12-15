@@ -117,6 +117,7 @@ expert_rewards = {"walker2d": 3464, "humanoid": 6494, "invertedpendulum": 1000, 
 for env_id in sorted(data.keys()):
     print('exporting {}'.format(env_id))
     plt.clf()
+    fig = plt.figure()
     # plt.xlim(-0.1, 3)
     legend_entries = []
     for algo in sorted(data[env_id].keys()):
@@ -130,11 +131,17 @@ for env_id in sorted(data.keys()):
         assert xs.shape == ys.shape
         x_max = np.max(xs) / 1e6
         mean = np.mean(ys, axis=0) / expert_rewards[env_id]
+        std = np.nanstd(ys, axis=0)
         nSeeds = ys.shape[0]
         ci_coef = 1.96 / (np.sqrt(nSeeds) * expert_rewards[env_id])
 
+        # if algo == "mdal_neural" and env_id == "walker2d":
+        #     entry = 630
+        #     xs = xs[:,:entry]
+        #     mean = mean[:entry]
+        #     std = std[:entry]
+
         plt.plot(xs[0] / 1e6, mean, label=algo)
-        std = np.nanstd(ys, axis=0)
         plt.fill_between(xs[0] / 1e6, mean - ci_coef * std, mean + ci_coef * std, alpha=0.2)  # , color=config_id[config])
     plt.hlines(1, 0, x_max, colors='k', linestyles='dashed')
     plt.text(0.1, 1.01, 'Expert Reward = {}'.format(expert_rewards[env_id]), fontsize=11, rotation_mode='anchor')
@@ -147,7 +154,8 @@ for env_id in sorted(data.keys()):
     handles, labels = plt.gca().get_legend_handles_labels()
     # order = [0, 1, 2, 3, 4]
     # legend = plt.legend([handles[idx] for idx in order],[labels[idx] for idx in order], ncol=5)
-    legend = plt.legend(handles, labels, ncol=2, loc='upper right')
+    legend = plt.legend(handles, labels, ncol=5, bbox_to_anchor=(0.5, -0.35), loc='lower center')
+    fig.subplots_adjust(bottom=0.25)
     # legend = plt.legend(loc='upper right')
 
     plt.savefig(os.path.join(args.dir, 'fig_{}.png'.format(env_id)))

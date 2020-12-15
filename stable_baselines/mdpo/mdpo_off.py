@@ -364,7 +364,10 @@ class MDPO_OFF(OffPolicyRLModel):
                     # (has to be separate from value train op, because min_qf_pi appears in policy_loss)
                     # policy_optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph)
                     policy_optimizer = tf.train.AdamOptimizer(learning_rate=3e-4)
-                    policy_train_op = policy_optimizer.minimize(policy_loss, var_list=tf_util.get_trainable_vars('model/pi'))
+                    grads, vars = zip(*policy_optimizer.compute_gradients(policy_loss, var_list=tf_util.get_trainable_vars('model/pi')))
+                    grads, norm = tf.clip_by_global_norm(grads, 100.0)
+                    policy_train_op = policy_optimizer.apply_gradients(zip(grads, vars))
+                    # policy_train_op = policy_optimizer.minimize(policy_loss, var_list=tf_util.get_trainable_vars('model/pi'))
 
                     # Value train op
                     # value_optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate_ph)
@@ -512,6 +515,7 @@ class MDPO_OFF(OffPolicyRLModel):
             if self.using_mdal:
                 # self._initialize_dataloader()
                 true_reward_buffer = deque(maxlen=40)
+                rewards_grad_norm_buffer = deque(maxlen=1)
 
             episode_successor_features = [np.zeros(self.n_features)]
             features_buffer = {}
@@ -678,7 +682,7 @@ class MDPO_OFF(OffPolicyRLModel):
 
 
                             with self.sess.as_default():
-                                self.reward_giver.train(ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
+                                _, reward_grad_norm = self.reward_giver.train(ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
                                                             ob_expert, ac_expert, np.expand_dims(gamma_expert, axis=1))
 
                             #
@@ -688,6 +692,7 @@ class MDPO_OFF(OffPolicyRLModel):
                             #         ac_batch = ac_batch[:, 0]
                             #     if len(ac_expert.shape) == 2:
                             #         ac_expert = ac_expert[:, 0]
+                        rewards_grad_norm_buffer.extend([reward_grad_norm])
 
                     else:
                         # policy_successor_features = np.mean(episode_successor_features[-21:-1], axis=0)
@@ -774,6 +779,8 @@ class MDPO_OFF(OffPolicyRLModel):
                         logger.logkv('EpTrueRewMean', safe_mean([ep_info['r'] for ep_info in self.ep_info_buf]))
                         # logger.logkv('EpTrueRewMean', safe_mean(true_reward_buffer))
                         logger.logkv('eplenmean', safe_mean([ep_info['l'] for ep_info in self.ep_info_buf]))
+                    logger.logkv('rewgradnorm', safe_mean(rewards_grad_norm_buffer))
+
                     logger.logkv("n_updates", n_updates)
                     logger.logkv("current_lr", current_lr)
                     # logger.logkv("ent_coef", 1-frac)
