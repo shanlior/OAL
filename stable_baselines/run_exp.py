@@ -146,6 +146,19 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, lam, log, exp
                 model = GAIL('MlpPolicy', env, dataset, verbose=1,
                              tensorboard_log="./experiments/" + env_name + "/gail/", seed=seed,
                              entcoeff=0.0, adversary_entcoeff=0.001)
+            elif algo == 'GAIL_MDPO_OFF':
+                # from mpi4py import MPI
+                from stable_baselines import GAIL_MDPO_OFF
+
+                model = GAIL_MDPO_OFF('MlpPolicy', env, dataset, verbose=1,
+                                        tensorboard_log="./experiments/" + env_name + "/gail_mdpo_off/", seed=seed,
+                                        ent_coef=0.0, adversary_entcoeff=0.001,
+                                        buffer_size=1000000, learning_starts=10000, batch_size=256,
+                                        tau=0.01,
+                                        gamma=0.99, gradient_steps=sgd_steps, mdpo_update_steps=mdpo_update_steps,
+                                        lam=0.0, train_freq=1, tsallis_q=1, reparameterize=True, t_pi=t_pi, t_c=t_c,
+                                        exploration_bonus=exploration_bonus, bonus_coef=bonus_coef,
+                                        is_action_features=is_action_features)
             else:
                 raise ValueError("Not a valid algorithm.")
 

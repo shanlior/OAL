@@ -4,7 +4,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import json
-import seaborn as sns;
+import seaborn as sns
 
 sns.set()
 import glob2
@@ -154,8 +154,8 @@ for env_id in sorted(data.keys()):
     handles, labels = plt.gca().get_legend_handles_labels()
     # order = [0, 1, 2, 3, 4]
     # legend = plt.legend([handles[idx] for idx in order],[labels[idx] for idx in order], ncol=5)
-    legend = plt.legend(handles, labels, ncol=5, bbox_to_anchor=(0.5, -0.35), loc='lower center')
-    fig.subplots_adjust(bottom=0.25)
+    legend = plt.legend(handles, labels, ncol=3, bbox_to_anchor=(0.5, -0.35), loc='lower center')
+    fig.subplots_adjust(bottom=0.3)
     # legend = plt.legend(loc='upper right')
 
     plt.savefig(os.path.join(args.dir, 'fig_{}.png'.format(env_id)))

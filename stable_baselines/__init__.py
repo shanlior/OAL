@@ -12,6 +12,8 @@ from stable_baselines.mdpo import MDPO_OFF
 from stable_baselines.mdal import MDAL_MDPO_OFF
 from stable_baselines.mdal import MDAL_MDPO_ON
 from stable_baselines.mdal import MDAL_TRPO
+from stable_baselines.gail import GAIL_MDPO_OFF
+
 
 
 
