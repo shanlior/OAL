@@ -328,58 +328,95 @@ class NeuralAdversary(object):
         self.obs_rms = None
 
         # Placeholders
-        self.generator_obs_ph = tf.placeholder(observation_space.dtype, (None,) + self.observation_shape,
+        self.policy_obs_ph = tf.placeholder(observation_space.dtype, (None,) + self.observation_shape,
                                                name="observations_ph")
-        self.generator_acs_ph = tf.placeholder(action_space.dtype, (None,) + self.actions_shape,
+        self.policy_acs_ph = tf.placeholder(action_space.dtype, (None,) + self.actions_shape,
                                                name="actions_ph")
-        self.generator_gammas_ph = tf.placeholder(tf.float32, (None, 1), name="gammas_ph")
+        self.policy_gammas_ph = tf.placeholder(tf.float32, (None, 1), name="gammas_ph")
         self.expert_obs_ph = tf.placeholder(observation_space.dtype, (None,) + self.observation_shape,
                                             name="expert_observations_ph")
         self.expert_acs_ph = tf.placeholder(action_space.dtype, (None,) + self.actions_shape,
                                             name="expert_actions_ph")
         self.expert_gammas_ph = tf.placeholder(tf.float32, (None, 1), name="gammas_ph")
+        self.mix_obs_ph = tf.placeholder(observation_space.dtype, (None,) + self.observation_shape,
+                                            name="expert_observations_ph")
+        self.mix_acs_ph = tf.placeholder(action_space.dtype, (None,) + self.actions_shape,
+                                            name="expert_actions_ph")
+
 
         # Build graph
-        generator_logits = self.build_graph(self.generator_obs_ph, self.generator_acs_ph, reuse=False)
-        expert_logits = self.build_graph(self.expert_obs_ph, self.expert_acs_ph, reuse=True)
-        generator_rewards = tf.math.sigmoid(generator_logits)
-        expert_rewards = tf.math.sigmoid(expert_logits)
-        generator_scaled_rewards = tf.multiply(generator_rewards, self.generator_gammas_ph)
-        # generator_scaled_rewards = generator_rewards
-        generator_value = tf.reduce_sum(generator_scaled_rewards)
-        # generator_value = tf.reduce_mean(generator_scaled_rewards)
-        expert_scaled_rewards = tf.multiply(expert_rewards, self.expert_gammas_ph)
-        # expert_scaled_rewards = expert_rewards
-        expert_value = tf.reduce_sum(expert_scaled_rewards)
-        # expert_value = tf.reduce_mean(expert_scaled_rewards)
+        policy_rewards = self.build_graph(self.policy_obs_ph, self.policy_acs_ph, reuse=False)
+        expert_rewards = self.build_graph(self.expert_obs_ph, self.expert_acs_ph, reuse=True)
+        # generator_rewards = tf.math.sigmoid(generator_logits)
+        # expert_rewards = tf.math.sigmoid(expert_logits)
+        # policy_scaled_rewards = tf.multiply(policy_rewards, self.policy_gammas_ph)
+        policy_scaled_rewards = policy_rewards
+        # policy_value = tf.reduce_sum(policy_scaled_rewards)
+        policy_value = tf.reduce_mean(policy_scaled_rewards)
+        # expert_scaled_rewards = tf.multiply(expert_rewards, self.expert_gammas_ph)
+        expert_scaled_rewards = expert_rewards
+        # expert_value = tf.reduce_sum(expert_scaled_rewards)
+        expert_value = tf.reduce_mean(expert_scaled_rewards)
 
-        # regularization = tf.reduce_mean((expert_rewards - 0.5 * tf.ones_like(expert_rewards)) ** 2) + \
-        #                  tf.reduce_mean((generator_rewards - 0.5 * tf.ones_like(generator_rewards)) ** 2)
-        # regularization = tf.reduce_mean(generator_logits ** 2) + tf.reduce_mean(expert_logits ** 2)
-        # regularization = tf.reduce_mean(tf.where(tf.math.abs(expert_rewards) > 1,
-        #                                          (expert_rewards - tf.math.sign(expert_rewards)) ** 2,
-        #                                          tf.zeros_like(expert_rewards))) \
-        #                   + tf.reduce_mean(tf.where(tf.math.abs(generator_rewards) > 1,
-        #                                             (generator_rewards - tf.math.sign(generator_rewards)) ** 2,
-        #                                             tf.zeros_like(generator_rewards)))
-        regularization = 0
-        # reg_coef = 0.000001
+        # alpha = tf.random.uniform([], 0.0, 1.0, observation_space.dtype)
+        # generator_obs_mix = tf.reduce_mean(self.generator_obs_ph, axis=0, keepdims=True)
+        # generator_acs_mix = tf.reduce_mean(self.generator_acs_ph, axis=0, keepdims=True)
+        # expert_obs_mix = tf.reduce_mean(self.expert_obs_ph, axis=0, keepdims=True)
+        # expert_acs_mix = tf.reduce_mean(self.expert_acs_ph, axis=0, keepdims=True)
+        # generator_obs_mix = (1-0.99) * tf.reduce_sum(tf.cast(self.generator_gammas_ph, observation_space.dtype) * self.generator_obs_ph, axis=0, keepdims=True)
+        # generator_acs_mix = (1-0.99) * tf.reduce_sum(tf.cast(self.generator_gammas_ph, action_space.dtype) * self.generator_acs_ph, axis=0, keepdims=True)
+        # expert_obs_mix = (1-0.99) * tf.reduce_sum(tf.cast(self.expert_gammas_ph, observation_space.dtype) * self.expert_obs_ph, axis=0, keepdims=True)
+        # expert_acs_mix = (1-0.99) * tf.reduce_sum(tf.cast(self.expert_gammas_ph, action_space.dtype) * self.expert_acs_ph, axis=0, keepdims=True)
+        # mixture_obs = alpha * generator_obs_mix + (1 - alpha) * tf.reduce_mean(expert_obs_mix)
+        # mixture_acs = tf.cast(alpha, action_space.dtype) * generator_acs_mix\
+        #               + tf.cast((1 - alpha), action_space.dtype) * expert_acs_mix
+        mixture_rewards = self.build_graph(self.mix_obs_ph, self.mix_acs_ph, reuse=True)
+        grads = tf.gradients(mixture_rewards, [self.mix_obs_ph, self.mix_acs_ph])[0]
+        norm = tf.cast(tf.sqrt(tf.reduce_sum(tf.square(grads), axis=1)), tf.float32)
+        grad_reg = tf.reduce_mean(tf.square(norm - 1.0))
+        grad_reg_coef = 1.0
+        grad_reg_loss = grad_reg_coef * grad_reg
 
-        reg_coef = 0.00
-        loss = generator_value - expert_value + reg_coef * regularization
+        rewards = tf.concat([policy_rewards, expert_rewards], 0)
+
+        rewards_reg = - tf.reduce_mean(logit_bernoulli_entropy(rewards))
+        rewards_reg_coef = 0.001
+
+        # rewards_reg = tf.reduce_sum(tf.square(rewards))
+        # rewards_reg_coef = 0.01
+
+        rewards_reg_loss = rewards_reg_coef * rewards_reg
+        policy_loss = policy_value - expert_value
+        loss = policy_loss + grad_reg_loss + rewards_reg_loss
 
         # Loss + Accuracy terms
         self.losses = [loss]
         self.loss_name = ["generator_loss", "expert_loss", "entropy", "entropy_loss", "generator_acc", "expert_acc"]
         # self.total_loss = loss
         # Build Reward for policy
-        self.reward_op = tf.stop_gradient(generator_rewards)
+        self.reward_op = tf.stop_gradient(policy_rewards)
         # self.reward_op = generator_rewards
 
 
         var_list = self.get_trainable_variables()
-        rewards_optimizer = tf.train.AdamOptimizer(learning_rate=3e-4)
+        rewards_optimizer = tf.train.AdamOptimizer(learning_rate=3e-4, beta1=0.5)
+        # rewards_optimizer = tf.train.AdamOptimizer(learning_rate=1e-3, beta1=0.5)
+
+        # rewards_optimizer = tf.train.AdamOptimizer(learning_rate=1e-2)
+
         # grads, vars = zip(*rewards_optimizer.compute_gradients(loss, var_list=var_list))
+        # accum_vars = [tf.Variable(tf.zeros_like(var.initialized_value()), trainable=False) for var in var_list]
+        # accumulation_counter = tf.Variable(0.0, trainable=False)
+
+        # zero_ops = [var.assign(tf.zeros_like(var)) for var in accum_vars]
+        # zero_ops.append(accumulation_counter.assign(0.0))
+
+        # gvs = rewards_optimizer.compute_gradients(loss, var_list)
+        # accumulate_ops = [accum_vars[i].assign_add(gv[0]) for i, gv in enumerate(gvs)]
+        # accumulate_ops.append(accumulation_counter.assign_add(1.0))
+
+        # train_step = rewards_optimizer.apply_gradients([(accum_vars[i] / accumulation_counter, gv[1]) for i, gv in enumerate(gvs)])
+
         # grads, vars = list(zip(*grads_and_vars))
         # grads, norm = tf.clip_by_global_norm(grads, 300.0)
         # rewards_train_op = rewards_optimizer.apply_gradients(zip(grads, vars))
@@ -388,10 +425,17 @@ class NeuralAdversary(object):
 
         # rewards_train_op = [rewards_train_op, norm]
 
+        # self.zero_grad = tf_util.function([], zero_ops)
+        # self.compute_grads = tf_util.function(
+        #     [self.generator_obs_ph, self.generator_acs_ph, self.generator_gammas_ph,
+        #      self.expert_obs_ph, self.expert_acs_ph, self.expert_gammas_ph], accumulate_ops)
+        # self.train = tf_util.function([], train_step)
+        # print_op = tf.print("Value diff:", policy_value - expert_value, "Grad Regularizer:", grad_reg)
+        print_op = tf.no_op()
         self.train = tf_util.function(
-            [self.generator_obs_ph, self.generator_acs_ph, self.generator_gammas_ph,
-             self.expert_obs_ph, self.expert_acs_ph, self.expert_gammas_ph], rewards_train_op)
-
+            [self.policy_obs_ph, self.policy_acs_ph, self.policy_gammas_ph,
+             self.expert_obs_ph, self.expert_acs_ph, self.expert_gammas_ph,
+             self.mix_obs_ph, self.mix_acs_ph], [rewards_train_op, print_op])
 
 
     def build_graph(self, obs_ph, acs_ph, reuse=False):
@@ -453,6 +497,6 @@ class NeuralAdversary(object):
             # one discrete action
             actions = np.expand_dims(actions, 0)
 
-        feed_dict = {self.generator_obs_ph: obs, self.generator_acs_ph: actions}
+        feed_dict = {self.policy_obs_ph: obs, self.policy_acs_ph: actions}
         reward = self.sess.run(self.reward_op, feed_dict)
         return reward
