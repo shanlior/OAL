@@ -118,7 +118,7 @@ class TRPO(ActorCriticRLModel):
     def setup_model(self):
         # prevent import loops
         from stable_baselines.gail.adversary import TransitionClassifier
-        from stable_baselines.mdal.adversary import TabularAdversaryTF, NeuralAdversary
+        from stable_baselines.mdal.adversary import TabularAdversaryTF, NeuralAdversaryTRPO, NeuralAdversaryMD
 
         with SetVerbosity(self.verbose):
 
@@ -141,8 +141,9 @@ class TRPO(ActorCriticRLModel):
                 elif self.using_mdal:
 
                     if self.neural:
-                        self.reward_giver = NeuralAdversary(self.sess, self.observation_space, self.action_space,
-                                                            self.hidden_size_adversary)
+                        self.reward_giver = NeuralAdversaryMD(self.sess, self.observation_space, self.action_space,
+                                                                self.hidden_size_adversary,
+                                                                entcoeff=self.adversary_entcoeff)
                     else:
                         self.reward_giver = TabularAdversaryTF(self.sess, self.observation_space, self.action_space,
                                                                  self.hidden_size_adversary,
@@ -251,7 +252,7 @@ class TRPO(ActorCriticRLModel):
 
                 with tf.variable_scope("Adam_mpi", reuse=False):
                     self.vfadam = MpiAdam(vf_var_list, sess=self.sess)
-                    if self.using_gail:
+                    if self.using_gail or self.using_mdal:
                         self.d_adam = MpiAdam(self.reward_giver.get_trainable_variables(), sess=self.sess)
                         self.d_adam.sync()
                     self.vfadam.sync()
@@ -292,6 +293,8 @@ class TRPO(ActorCriticRLModel):
     def _initialize_dataloader(self):
         """Initialize dataloader."""
         batchsize = self.timesteps_per_batch // self.d_step
+        # batchsize = self.timesteps_per_batch * self.g_step
+
         self.expert_dataset.init_dataloader(batchsize)
 
     def learn(self, total_timesteps, callback=None, log_interval=100, tb_log_name="TRPO",
@@ -332,6 +335,7 @@ class TRPO(ActorCriticRLModel):
                     #  ep_stats = Stats(["True_rewards", "Rewards", "Episode_length"])
 
                 d_step = 0
+                sgd_cycle = 0
                 policy_successor_features = None
 
                 while True:
@@ -352,6 +356,7 @@ class TRPO(ActorCriticRLModel):
                     observation = None
                     action = None
                     seg = None
+                    first_update_param=True
                     for k in range(self.g_step):
                         with self.timed("sampling"):
                             seg = seg_gen.__next__()
@@ -373,6 +378,10 @@ class TRPO(ActorCriticRLModel):
 
                         # ob, ac, atarg, ret, td1ret = map(np.concatenate, (obs, acs, atargs, rets, td1rets))
                         observation, action = seg["observations"], seg["actions"]
+                        # if k > 0:
+                        #     obs_batch, acs_batch = np.concatenate([obs_batch, observation], axis=0), np.concatenate([acs_batch, action], axis=0)
+                        # else:
+                        obs_batch, acs_batch = observation, action
                         atarg, tdlamret = seg["adv"], seg["tdlamret"]
                         # if self.using_mdal:
                         #     covariance_lambda = seg["covariance_lambda"]
@@ -419,6 +428,7 @@ class TRPO(ActorCriticRLModel):
                         else:
                             with self.timed("conjugate_gradient"):
                                 stepdir = conjugate_gradient(fisher_vector_product, grad, cg_iters=self.cg_iters,
+                                                             # residual_tol=1e-6, verbose=1)
                                                              verbose=self.rank == 0 and self.verbose >= 2)
                             assert np.isfinite(stepdir).all()
                             shs = .5 * stepdir.dot(fisher_vector_product(stepdir))
@@ -478,53 +488,154 @@ class TRPO(ActorCriticRLModel):
                     logger.record_tabular("explained_variance_tdlam_before",
                                           explained_variance(vpredbefore, tdlamret))
 
-                    d_step += 1
 
-                    if d_step == self.d_step:
-                        d_step = 0
+                    if self.using_gail:
+                        # ------------------ Update D ------------------
+                        logger.log("Optimizing Discriminator...")
+                        logger.log(fmt_row(13, self.reward_giver.loss_name))
+                        assert len(observation) == self.timesteps_per_batch
+                        batch_size = self.timesteps_per_batch // self.d_step
 
-                        if self.using_gail:
-                            # ------------------ Update D ------------------
-                            logger.log("Optimizing Discriminator...")
-                            logger.log(fmt_row(13, self.reward_giver.loss_name))
-                            assert len(observation) == self.timesteps_per_batch
-                            batch_size = self.timesteps_per_batch // self.d_step
+                        # NOTE: uses only the last g step for observation
+                        d_losses = []  # list of tuples, each of which gives the loss for a minibatch
+                        # NOTE: for recurrent policies, use shuffle=False?
+                        for ob_batch, ac_batch in dataset.iterbatches((observation, action),
+                                                                      include_final_partial_batch=False,
+                                                                      batch_size=batch_size,
+                                                                      shuffle=True):
+                            ob_expert, ac_expert = self.expert_dataset.get_next_batch()
+                            # update running mean/std for reward_giver
+                            if self.reward_giver.normalize:
+                                self.reward_giver.obs_rms.update(np.concatenate((ob_batch, ob_expert), 0))
 
-                            # NOTE: uses only the last g step for observation
-                            d_losses = []  # list of tuples, each of which gives the loss for a minibatch
-                            # NOTE: for recurrent policies, use shuffle=False?
-                            for ob_batch, ac_batch in dataset.iterbatches((observation, action),
-                                                                          include_final_partial_batch=False,
-                                                                          batch_size=batch_size,
-                                                                          shuffle=True):
-                                ob_expert, ac_expert = self.expert_dataset.get_next_batch()
-                                # update running mean/std for reward_giver
-                                if self.reward_giver.normalize:
-                                    self.reward_giver.obs_rms.update(np.concatenate((ob_batch, ob_expert), 0))
+                            # Reshape actions if needed when using discrete actions
+                            if isinstance(self.action_space, gym.spaces.Discrete):
+                                if len(ac_batch.shape) == 2:
+                                    ac_batch = ac_batch[:, 0]
+                                if len(ac_expert.shape) == 2:
+                                    ac_expert = ac_expert[:, 0]
+                            *newlosses, grad = self.reward_giver.lossandgrad(ob_batch, ac_batch, ob_expert, ac_expert)
+                            self.d_adam.update(self.allmean(grad), self.d_stepsize)
+                            d_losses.append(newlosses)
+                        logger.log(fmt_row(13, np.mean(d_losses, axis=0)))
 
-                                # Reshape actions if needed when using discrete actions
-                                if isinstance(self.action_space, gym.spaces.Discrete):
-                                    if len(ac_batch.shape) == 2:
-                                        ac_batch = ac_batch[:, 0]
-                                    if len(ac_expert.shape) == 2:
-                                        ac_expert = ac_expert[:, 0]
-                                *newlosses, grad = self.reward_giver.lossandgrad(ob_batch, ac_batch, ob_expert, ac_expert)
-                                self.d_adam.update(self.allmean(grad), self.d_stepsize)
-                                d_losses.append(newlosses)
-                            logger.log(fmt_row(13, np.mean(d_losses, axis=0)))
+                    elif self.using_mdal:
+                        batch_sampling = True
 
-                        elif self.using_mdal:
+                        if self.neural:
 
-                            if self.neural:
+                            if batch_sampling:
+                                batch_size = self.timesteps_per_batch // self.d_step
+                                # batch_size = obs_batch.shape[0]
+                                # NOTE: uses only the last g step for observation
+                                d_losses = []  # list of tuples, each of which gives the loss for a minibatch
+                                # NOTE: for recurrent policies, use shuffle=False?
+                                self.d_adam.sync()
+                                with self.sess.as_default():
+                                    self.reward_giver.update_old_rewards(sess=self.sess)
+                                self.d_adam.sync()
+
+                                update_step = True
+                                for ob_batch, ac_batch in dataset.iterbatches((observation, action),
+                                                                              include_final_partial_batch=False,
+                                                                              batch_size=batch_size,
+                                                                              shuffle=True):
+                                # ob_batch, ac_batch, gamma_batch = np.array(batch_buffer['obs']), np.array(
+                                #     batch_buffer['acs']), np.array(batch_buffer['gammas'])
+                                    gamma_batch = np.ones((ob_batch.shape[0]))
+                                    ob_expert, ac_expert = self.expert_dataset.get_next_batch()
+                                    gamma_expert = np.ones((ob_expert.shape[0]))
+                                    # ob_expert, ac_expert, gamma_expert = np.concatenate(self.expert_dataset.ep_obs),\
+                                    #                                      np.concatenate(self.expert_dataset.ep_acs),\
+                                    #                                      np.concatenate(self.expert_dataset.ep_gammas)
+
+                                    # update running mean/std for reward_giver
+                                    if self.reward_giver.normalize:
+                                        self.reward_giver.obs_rms.update(np.concatenate((ob_batch, ob_expert), 0))
+
+                                    # Reshape actions if needed when using discrete actions
+                                    if isinstance(self.action_space, gym.spaces.Discrete):
+                                        if len(ac_batch.shape) == 2:
+                                            ac_batch = ac_batch[:, 0]
+                                        if len(ac_expert.shape) == 2:
+                                            ac_expert = ac_expert[:, 0]
+
+                                    ob_reg_expert, ac_reg_expert = np.array(ob_expert), np.array(ac_expert)
+
+                                    # while True:
+                                    #     if ob_reg_expert.shape[0] == ob_batch.shape[0] and ac_reg_expert.shape[0] == \
+                                    #             ac_batch.shape[0]:
+                                    #         break
+                                    #     ob_reg_expert, ac_reg_expert = self.expert_dataset.get_next_batch()
+                                    #     ob_reg_expert, ac_reg_expert = np.array(ob_reg_expert), np.array(ac_reg_expert)
+
+
+                                    length = min(ob_batch.shape[0], ob_reg_expert.shape[0])
+                                    alpha = np.random.uniform(0.0, 1.0, size=(length, 1))
+
+                                    ob_mix_batch = alpha * ob_batch[:length] + (1 - alpha) * ob_reg_expert[:length]
+                                    ac_mix_batch = alpha * ac_batch[:length] + (1 - alpha) * ac_reg_expert[:length]
+                                    with self.sess.as_default():
+                                        # self.reward_giver.train(ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
+                                        #                         ob_expert, ac_expert, np.expand_dims(gamma_expert, axis=1))
+                                        # if sgd_cycle == 0:
+                                        #     self.reward_giver.update_old_rewards(sess=self.sess)
+                                        # sgd_cycle = (sgd_cycle + 1) % 10
+                                        # for up_id in range(int(self.sgd_steps)):
+                                        self.d_adam.sync()
+                                        *newlosses, grad = self.reward_giver.lossandgrad(
+                                                                    ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
+                                                                    ob_expert, ac_expert, np.expand_dims(gamma_expert, axis=1),
+                                                                    ob_mix_batch, ac_mix_batch)
+                                        self.d_adam.update(self.allmean(grad), self.d_stepsize, update_step=update_step)
+                                        update_step=False
+                                        self.reward_giver.clip_weights()
+                                        self.d_adam.sync()
+
+                                        # sgd_step += 1
+                                        # if sgd_step == sgd_iterations or first_update_param:
+                                        #     self.d_adam.update(self.allmean(grad), self.d_stepsize, update_params=True)
+                                        #     first_update_param = False
+                                        # else:
+                                        #     self.d_adam.update(self.allmean(grad), self.d_stepsize, update_params=False)
+
+                                        #     if up_id == (self.sgd_steps - 1):
+                                        #         update_adam_parameters = True
+                                        #     else:
+                                        #         update_adam_parameters = False
+                                        #     self.d_adam.update(self.allmean(grad), self.d_stepsize, update_adam_parameters)
+                                            # self.reward_giver.train(ob_batch, ac_batch,
+                                            #                         np.expand_dims(gamma_batch, axis=1),
+                                            #                         ob_expert, ac_expert,
+                                            #                         np.expand_dims(gamma_expert, axis=1),
+                                            #                         ob_mix_batch, ac_mix_batch)
+                                            # ob_expert, ac_expert = self.expert_dataset.get_next_batch()
+                                            # gamma_expert = np.ones((ob_expert.shape[0]))
+                                        # self.reward_giver.update_old_rewards(sess=self.sess)
+                                    # with self.sess.as_default():
+                                        # self.reward_giver.update_old_rewards(sess=self.sess)
+                                self.d_adam.sync()
+                                with self.sess.as_default():
+                                    self.reward_giver.update_old_rewards(sess=self.sess)
+                                self.d_adam.sync()
+                            else:
                                 # assert len(observation) == self.timesteps_per_batch
                                 # Comment out if you want only the latest rewards:
+                                if self.reward_giver.normalize:
+                                    ob_reg_batch, ac_reg_batch = obs_batch, acs_batch
+                                    ob_reg_expert, ac_reg_expert = self.expert_dataset.get_next_batch()
+                                    # ob_reg_expert, ac_reg_expert = ob_expert, ac_expert
+                                    self.reward_giver.obs_rms.update(np.concatenate((ob_reg_batch, ob_reg_expert), 0))
+
                                 obs_batch, acs_batch, gammas_batch = seg['obs_batch'], seg['acs_batch'], seg['gammas_batch']
                                 batch_successor_features = seg['successor_features_batch']
 
 
-                                if self.reward_giver.normalize:
-                                    self.reward_giver.obs_rms.update(
-                                        np.array(batch_successor_features)[:, :self.observation_space.shape[0]])
+
+                                #     self.reward_giver.obs_rms.update(
+                                #         np.array(batch_successor_features)[:, :self.observation_space.shape[0]])
+
+                                # self.reward_giver.update_old_rewards(sess=self.sess)
 
                                 for idx, (ob_batch, ac_batch, gamma_batch) in enumerate(
                                         zip(obs_batch, acs_batch, gammas_batch)):
@@ -535,11 +646,28 @@ class TRPO(ActorCriticRLModel):
 
                                     ob_batch, ac_batch, gamma_batch = np.array(ob_batch), np.array(ac_batch), np.array(
                                         gamma_batch)
+                                    while True:
+                                        if ob_reg_expert.shape[0] == ob_reg_batch.shape[0] and ac_reg_expert.shape[0] == \
+                                                ac_reg_batch.shape[0]:
+                                            break
+                                        ob_reg_expert, ac_reg_expert = self.expert_dataset.get_next_batch()
+                                        ob_reg_expert, ac_reg_expert = np.array(ob_reg_expert), np.array(
+                                                ac_reg_expert)
+                                    alpha = np.random.uniform(0.0, 1.0, size=(ob_reg_batch.shape[0], 1))
+                                    ob_mix_batch = alpha * ob_reg_batch + (1 - alpha) * ob_reg_expert
+                                    ac_mix_batch = alpha * ac_reg_batch + (1 - alpha) * ac_reg_expert
 
                                     with self.sess.as_default():
-                                        self.reward_giver.train(ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
-                                                                ob_expert, ac_expert,
-                                                                np.expand_dims(gamma_expert, axis=1))
+                                        *newlosses, grad = self.reward_giver.lossandgrad(
+                                                                ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
+                                                                ob_expert, ac_expert, np.expand_dims(gamma_expert, axis=1),
+                                                                ob_mix_batch, ac_mix_batch)
+                                        self.d_adam.update(self.allmean(grad), self.d_stepsize)
+                                        # self.reward_giver.train(ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
+                                        #                         ob_expert, ac_expert,
+                                        #                         np.expand_dims(gamma_expert, axis=1),
+                                        #                         ob_mix_batch, ac_mix_batch)
+
 
                                     #
                                     # # Reshape actions if needed when using discrete actions
@@ -548,26 +676,71 @@ class TRPO(ActorCriticRLModel):
                                     #         ac_batch = ac_batch[:, 0]
                                     #     if len(ac_expert.shape) == 2:
                                     #         ac_expert = ac_expert[:, 0]
+                            # else:
+                            #     # assert len(observation) == self.timesteps_per_batch
+                            #     # Comment out if you want only the latest rewards:
+                            #     obs_batch, acs_batch, gammas_batch = seg['obs_batch'], seg['acs_batch'], seg['gammas_batch']
+                            #     batch_successor_features = seg['successor_features_batch']
+                            #
+                            #
+                            #     if self.reward_giver.normalize:
+                            #         self.reward_giver.obs_rms.update(
+                            #             np.array(batch_successor_features)[:, :self.observation_space.shape[0]])
+                            #
+                            #     for idx, (ob_batch, ac_batch, gamma_batch) in enumerate(
+                            #             zip(obs_batch, acs_batch, gammas_batch)):
+                            #         rand_traj = np.random.randint(self.expert_dataset.num_traj)
+                            #         ob_expert, ac_expert, gamma_expert = self.expert_dataset.ep_obs[rand_traj], \
+                            #                                              self.expert_dataset.ep_acs[rand_traj], \
+                            #                                              self.expert_dataset.ep_gammas[rand_traj]
+                            #
+                            #         ob_batch, ac_batch, gamma_batch = np.array(ob_batch), np.array(ac_batch), np.array(
+                            #             gamma_batch)
+                            #
+                            #         # while True:
+                            #         #     ob_reg_expert, ac_reg_expert = self.expert_dataset.get_next_batch()
+                            #         #     ob_reg_expert, ac_reg_expert = np.array(ob_reg_expert), np.array(ac_reg_expert)
+                            #         #
+                            #         #     if ob_reg_expert.shape[0] == ob_batch.shape[0] and ac_reg_expert.shape[0] == \
+                            #         #             ac_batch.shape[0]:
+                            #         #         break
+                            #         # alpha = np.random.uniform(0.0, 1.0, size=(ob_batch.shape[0], 1))
+                            #         # ob_mix_batch = alpha * ob_batch + (1 - alpha) * ob_reg_expert
+                            #         # ac_mix_batch = alpha * ac_batch + (1 - alpha) * ac_reg_expert
+                            #
+                            #         with self.sess.as_default():
+                            #             self.reward_giver.train(ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
+                            #                                     ob_expert, ac_expert,
+                            #                                     np.expand_dims(gamma_expert, axis=1),
+                            #                                     ob_mix_batch, ac_mix_batch)
+                            #
+                            #         #
+                            #         # # Reshape actions if needed when using discrete actions
+                            #         # if isinstance(self.action_space, gym.spaces.Discrete):
+                            #         #     if len(ac_batch.shape) == 2:
+                            #         #         ac_batch = ac_batch[:, 0]
+                            #         #     if len(ac_expert.shape) == 2:
+                            #         #         ac_expert = ac_expert[:, 0]
 
-                            else:
-                                obs_batch, acs_batch, gammas_batch = seg['obs_batch'], seg['acs_batch'], seg['gammas_batch']
-                                batch_successor_features = seg['successor_features_batch']
-                                policy_successor_features_mean = np.mean(batch_successor_features, axis=0)
+                        else:
+                            obs_batch, acs_batch, gammas_batch = seg['obs_batch'], seg['acs_batch'], seg['gammas_batch']
+                            batch_successor_features = seg['successor_features_batch']
+                            policy_successor_features_mean = np.mean(batch_successor_features, axis=0)
 
-                                if self.reward_giver.normalize:
-                                    # self.reward_giver.obs_rms.update(
-                                    #     np.array(batch_successor_features)[:, :self.observation_space.shape[0]])
-                                    self.reward_giver.obs_rms.update(np.array(batch_successor_features))
+                            if self.reward_giver.normalize:
+                                # self.reward_giver.obs_rms.update(
+                                #     np.array(batch_successor_features)[:, :self.observation_space.shape[0]])
+                                self.reward_giver.obs_rms.update(np.array(batch_successor_features))
 
 
-                                # policy_successor_features_mean = np.mean(policy_successor_features, axis=0)
+                            # policy_successor_features_mean = np.mean(policy_successor_features, axis=0)
 
-                                # if self.reward_giver.normalize:
-                                #     self.reward_giver.obs_rms.update(policy_successor_features_mean)
+                            # if self.reward_giver.normalize:
+                            #     self.reward_giver.obs_rms.update(policy_successor_features_mean)
 
-                                self.reward_giver.update_reward(policy_successor_features_mean)
+                            self.reward_giver.update_reward(policy_successor_features_mean)
 
-                                policy_successor_features = None
+                            policy_successor_features = None
 
 
 
@@ -587,11 +760,12 @@ class TRPO(ActorCriticRLModel):
                     reward_buffer.extend(rews)
 
                     if len(len_buffer) > 0:
-                        logger.record_tabular("EpLenMean", np.mean(len_buffer))
-                        logger.record_tabular("EpRewMean", np.mean(reward_buffer))
                         if self.using_gail or self.using_mdal:
                             logger.record_tabular("EpTrueRewMean", np.mean(true_reward_buffer))
-                    logger.record_tabular("EpThisIter", len(lens))
+
+                        logger.record_tabular("epRewMean", np.mean(reward_buffer))
+                        logger.record_tabular("epLenMean", np.mean(len_buffer))
+                    logger.record_tabular("epThisIter", len(lens))
                     episodes_so_far += len(lens)
                     current_it_timesteps = MPI.COMM_WORLD.allreduce(seg["total_timestep"])
                     timesteps_so_far += current_it_timesteps

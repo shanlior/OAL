@@ -128,7 +128,7 @@ class ExpertDataset(object):
         indices = np.random.permutation(len(self.observations)).astype(np.int64)
         self.dataloader = DataLoader(indices, self.observations, self.actions, batch_size,
                                      shuffle=self.randomize, start_process=False,
-                                     sequential=self.sequential_preprocessing)
+                                     sequential=self.sequential_preprocessing, partial_minibatch=False)
 
     def __del__(self):
         # Exit processes if needed

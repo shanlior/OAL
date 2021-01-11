@@ -17,10 +17,9 @@ from stable_baselines.mdal import MDAL_MDPO_OFF, MDAL_MDPO_ON, MDAL_TRPO
 from stable_baselines.gail import ExpertDataset, generate_expert_traj
 import os
 
-
 def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, lam, log, expert_path, pretrain, pretrain_epochs,
           mdpo_update_steps, num_trajectories, expert_model, exploration_bonus, bonus_coef, random_action_len,
-          is_action_features, dir_name, neural):
+          is_action_features, dir_name, neural, args):
     """
     Train TRPO model for the mujoco environment, for testing purposes
     :param env_id: (str) Environment ID
@@ -29,8 +28,9 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, lam, log, exp
     """
 
     with tf_util.single_threaded_session():
-        from mpi4py import MPI
-        rank = MPI.COMM_WORLD.Get_rank()
+        # from mpi4py import MPI
+        # rank = MPI.COMM_WORLD.Get_rank()
+        rank = 0
         env_name = env_id[:-3].lower()
         log_dir = './experiments/' + env_name + '/' + str(algo).lower() + '/'\
                   + 'tpi' + str(t_pi) + '_tc' + str(t_c) + '_lam' + str(lam)
@@ -49,6 +49,18 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, lam, log, exp
         expert_path = './experts/' + expert_path
 
         num_timesteps = int(num_timesteps)
+
+
+        args = args.__dict__
+
+        dir_path = os.getcwd() + log_dir[1:]
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path)
+            with open(os.getcwd() + log_dir[1:] + 'args.txt', 'w') as file:
+                file.write("Experiment Arguments:")
+                for key, val in args.items():
+                    print(key, ": ", val, file=file)
+
 
         if log:
             if rank == 0:
@@ -116,28 +128,28 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, lam, log, exp
                                       tensorboard_log="./experiments/" + env_name + "/mdal/", seed=seed,
                                       buffer_size=1000000, ent_coef=0.0, learning_starts=10000, batch_size=256, tau=0.01,
                                       gamma=0.99, gradient_steps=sgd_steps, mdpo_update_steps=mdpo_update_steps,
-                                      lam=0.0, train_freq=1, tsallis_q=1, reparameterize=True, t_pi=t_pi, t_c=t_c,
+                                      lam=0.0, train_freq=1, d_step=10, tsallis_q=1, reparameterize=True, t_pi=t_pi, t_c=t_c,
                                       exploration_bonus=exploration_bonus, bonus_coef=bonus_coef,
                                       is_action_features=is_action_features,
                                       neural=neural)
             elif algo == 'MDAL_ON_POLICY':
-                model = MDAL_MDPO_ON('MlpPolicy', env, dataset, verbose=1,
+                model = MDAL_MDPO_ON('MlpPolicy', env, dataset, verbose=1, timesteps_per_batch=2048,
                                       tensorboard_log="./experiments/" + env_name + "/mdal_mdpo_on/", seed=seed,
                                       max_kl=0.01, cg_iters=10, cg_damping=0.1, entcoeff=0.0, adversary_entcoeff=0.001,
                                       gamma=0.99, lam=0.95, vf_iters=5, vf_stepsize=1e-3, sgd_steps=sgd_steps,
-                                      klcoeff=t_pi, method="multistep-SGD", tsallis_q=1.0,
+                                      klcoeff=1.0, method="multistep-SGD", tsallis_q=1.0,
                                       t_pi=t_pi, t_c=t_c,
                                       exploration_bonus=exploration_bonus, bonus_coef=bonus_coef,
-                                      is_action_features=is_action_features, neural=neural
-                                     )
+                                      is_action_features=is_action_features, neural=neural)
 
             elif algo == 'MDAL_TRPO':
                 model = MDAL_TRPO('MlpPolicy', env, dataset, verbose=1,
                                       tensorboard_log="./experiments/" + env_name + "/mdal_trpo/", seed=seed,
-                                      gamma=0.99, lam=lam, g_step=1, d_step=3,
-                                      entcoeff=0.0, adversary_entcoeff=0.0, max_kl=t_pi, t_pi=t_pi, t_c=t_c,
+                                      gamma=0.99, g_step=3, d_step=1, sgd_steps=1, d_stepsize=9e-5,
+                                      entcoeff=0.0, adversary_entcoeff=0.001, max_kl=t_pi, t_pi=t_pi, t_c=t_c,
                                       exploration_bonus=exploration_bonus, bonus_coef=bonus_coef,
-                                      is_action_features=is_action_features, neural=neural)
+                                      is_action_features=is_action_features, neural=neural, lam=0.98,
+                                      timesteps_per_batch=2000)
 
             elif algo == 'GAIL':
                 from mpi4py import MPI
@@ -197,7 +209,8 @@ def main():
               t_pi=args.t_pi, t_c=args.t_c, lam=args.lam, log=log,
               pretrain=args.pretrain, pretrain_epochs=args.pretrain_epochs,
               exploration_bonus=args.exploration, bonus_coef=args.bonus_coef,
-                          random_action_len=args.random_action_len, dir_name=args.dir_name, neural=args.neural)
+                          random_action_len=args.random_action_len, dir_name=args.dir_name, neural=args.neural,
+                          args=args)
 
 
 if __name__ == '__main__':

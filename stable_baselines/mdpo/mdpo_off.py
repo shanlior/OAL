@@ -172,7 +172,7 @@ class MDPO_OFF(OffPolicyRLModel):
 
         # prevent import loops
         from stable_baselines.gail.adversary import TransitionClassifierMDPO
-        from stable_baselines.mdal.adversary import TabularAdversaryTF, NeuralAdversary
+        from stable_baselines.mdal.adversary import TabularAdversaryTF, NeuralAdversary, NeuralAdversaryMDPO
 
 
         if isinstance(self.action_space, gym.spaces.Box):
@@ -205,7 +205,7 @@ class MDPO_OFF(OffPolicyRLModel):
                                                              entcoeff=self.adversary_entcoeff)
                 elif self.using_mdal:
                     if self.neural:
-                        self.reward_giver = NeuralAdversary(self.sess, self.observation_space, self.action_space,
+                        self.reward_giver = NeuralAdversaryMDPO(self.sess, self.observation_space, self.action_space,
                                                             self.hidden_size_adversary, normalize=True)
 
                     else:
@@ -490,6 +490,7 @@ class MDPO_OFF(OffPolicyRLModel):
         """Initialize dataloader."""
         batchsize = self.timesteps_per_batch // self.d_step
     #     batchsize = 1
+    #     batchsize = self.batch_size
         self.expert_dataset.init_dataloader(batchsize)
 
     def learn(self, total_timesteps, callback=None,
@@ -514,6 +515,7 @@ class MDPO_OFF(OffPolicyRLModel):
             current_lr = self.learning_rate(1)
             frac = 0
             t_pi = 0
+            d_step = 0
 
             start_time = time.time()
             episode_rewards = [0.0]
@@ -603,6 +605,18 @@ class MDPO_OFF(OffPolicyRLModel):
 
                 # Store transition in the replay buffer.
                 self.replay_buffer_add(obs_, action, reward_, new_obs_, done, info)
+
+                if len(batch_buffer['obs']) < self.update_reward_freq:
+                    batch_buffer['obs'].append(obs_)
+                    batch_buffer['acs'].append(action)
+                    batch_buffer['gammas'].append(self.gamma ** h_step)
+
+                else:
+                    batch_buffer['obs'][batch_idx] = obs_
+                    batch_buffer['acs'][batch_idx] = action
+                    batch_buffer['gammas'][batch_idx] = self.gamma ** h_step
+
+                    batch_idx = (batch_idx + 1) % self.update_reward_freq
                 obs = new_obs
                 # Save the unnormalized observation
                 if self._vec_normalize_env is not None:
@@ -656,6 +670,11 @@ class MDPO_OFF(OffPolicyRLModel):
                 if step % self.mdpo_update_steps == 0:
                     self.sess.run(self.assign_policy_op)
 
+                # if step % (10 * self.update_reward_freq)  == 0:
+                #     with self.sess.as_default():
+                #         self.sess.run(self.reward_giver.update_old_rewards())
+
+
                 # Update Rewards
                 if (self.using_mdal or self.using_gail) and self.num_timesteps % self.update_reward_freq == 0\
                         and self.num_timesteps > 1 and self.num_timesteps > self.learning_starts:
@@ -691,51 +710,99 @@ class MDPO_OFF(OffPolicyRLModel):
                         # d_losses.append(newlosses)
                         # logger.log(fmt_row(13, np.mean(d_losses, axis=0)))
                     elif self.using_mdal:
+                        update_each_time = False
                         batch_sampling = True
                         if self.neural:
                             if batch_sampling:
-                                batch_size = self.timesteps_per_batch // self.d_step
+                                if update_each_time:
+                                    # frac = 1.0 - step / total_timesteps
+                                    # current_lr = self.learning_rate(frac)
+                                    # t_pi = self.t_pi  # * np.sqrt(step / total_timesteps)
+                                    # batch = self.replay_buffer.sample(self.batch_size, env=self._vec_normalize_env)
+                                    # ob_batch, ac_batch, _, _, _, _ = batch
+                                    ob_batch, ac_batch = batch_buffer['obs'], batch_buffer['acs']
+                                    ob_expert, ac_expert = self.expert_dataset.get_next_batch()
+                                    if self.reward_giver.normalize:
+                                        self.reward_giver.obs_rms.update(np.concatenate((ob_batch, ob_expert), 0))
+                                    alpha = np.random.uniform(0.0, 1.0, size=(ob_batch.shape[0], 1))
+                                    ob_mix_batch = alpha * ob_batch + (1 - alpha) * ob_expert
+                                    ac_mix_batch = alpha * ac_batch + (1 - alpha) * ac_expert
+                                    gamma_expert = gamma_batch = np.ones((ob_batch.shape[0]))
 
-                                # NOTE: uses only the last g step for observation
-                                d_losses = []  # list of tuples, each of which gives the loss for a minibatch
-                                # NOTE: for recurrent policies, use shuffle=False?
+                                    with self.sess.as_default():
+                                        self.reward_giver.train(ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
+                                                                ob_expert, ac_expert, np.expand_dims(gamma_expert, axis=1),
+                                                                ob_mix_batch, ac_mix_batch)
+                                else:
+                                    batch_size = self.timesteps_per_batch // self.d_step
 
-                                ob_batch, ac_batch, gamma_batch = np.array(batch_buffer['obs']), np.array(batch_buffer['acs']), np.array(batch_buffer['gammas'])
-                                ob_expert, ac_expert = self.expert_dataset.get_next_batch()
-                                gamma_expert = np.ones((ob_expert.shape[0]))
-                                # ob_expert, ac_expert, gamma_expert = np.concatenate(self.expert_dataset.ep_obs),\
-                                #                                      np.concatenate(self.expert_dataset.ep_acs),\
-                                #                                      np.concatenate(self.expert_dataset.ep_gammas)
-                                while True:
-                                    ob_reg_expert, ac_reg_expert = self.expert_dataset.get_next_batch()
-                                    ob_reg_expert, ac_reg_expert = np.array(ob_reg_expert), np.array(ac_reg_expert)
-                                    # print("expert")
-                                    # print(ob_reg_expert.shape)
-                                    # print(ac_reg_expert.shape)
-                                    if ob_reg_expert.shape[0] == ob_batch.shape[0] and ac_reg_expert.shape[0] == ac_batch.shape[0]:
-                                        break
-                                # update running mean/std for reward_giver
-                                # if self.reward_giver.normalize:
-                                #     self.reward_giver.obs_rms.update(
-                                #         np.array(batch_successor_features)[:,:self.observation_space.shape[0]])
-                                if self.reward_giver.normalize:
-                                    self.reward_giver.obs_rms.update(np.concatenate((ob_batch, ob_expert), 0))
+                                    # NOTE: uses only the last g step for observation
+                                    d_losses = []  # list of tuples, each of which gives the loss for a minibatch
+                                    # NOTE: for recurrent policies, use shuffle=False?
+                                    with self.sess.as_default():
+                                        self.sess.run(self.reward_giver.update_old_rewards())
 
-                                # Reshape actions if needed when using discrete actions
-                                if isinstance(self.action_space, gym.spaces.Discrete):
-                                    if len(ac_batch.shape) == 2:
-                                        ac_batch = ac_batch[:, 0]
-                                    if len(ac_expert.shape) == 2:
-                                        ac_expert = ac_expert[:, 0]
-                                alpha = np.random.uniform(0.0, 1.0, size=(ob_batch.shape[0], 1))
-                                ob_mix_batch = alpha * ob_batch + (1 - alpha) * ob_reg_expert
-                                ac_mix_batch = alpha * ac_batch + (1 - alpha) * ac_reg_expert
-                                with self.sess.as_default():
-                                    # self.reward_giver.train(ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
-                                    #                         ob_expert, ac_expert, np.expand_dims(gamma_expert, axis=1))
-                                    self.reward_giver.train(ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
-                                                            ob_expert, ac_expert, np.expand_dims(gamma_expert, axis=1),
-                                                            ob_mix_batch, ac_mix_batch)
+                                    for ob_batch, ac_batch in dataset.iterbatches((batch_buffer['obs'], batch_buffer['acs']),
+                                                                                  include_final_partial_batch=False,
+                                                                                  batch_size=batch_size,
+                                                                                  shuffle=True):
+                                    # NOTE: uses only the last g step for observation
+                                    # d_losses = []  # list of tuples, each of which gives the loss for a minibatch
+                                    # NOTE: for recurrent policies, use shuffle=False?
+                                    #
+                                    # ob_batch, ac_batch, gamma_batch = np.array(batch_buffer['obs']), np.array(batch_buffer['acs']), np.array(batch_buffer['gammas'])
+                                        ob_expert, ac_expert = self.expert_dataset.get_next_batch()
+                                        gamma_batch = gamma_expert = np.ones((ob_expert.shape[0]))
+                                        # ob_expert, ac_expert, gamma_expert = np.concatenate(self.expert_dataset.ep_obs),\
+                                        #                                      np.concatenate(self.expert_dataset.ep_acs),\
+                                        #                                      np.concatenate(self.expert_dataset.ep_gammas)
+                                        # while True:
+                                        #     ob_reg_expert, ac_reg_expert = self.expert_dataset.get_next_batch()
+                                        #     ob_reg_expert, ac_reg_expert = np.array(ob_reg_expert), np.array(ac_reg_expert)
+                                        #     # print("expert")
+                                        #     # print(ob_reg_expert.shape)
+                                        #     # print(ac_reg_expert.shape)
+                                        #     if ob_reg_expert.shape[0] == ob_batch.shape[0] and ac_reg_expert.shape[0] == ac_batch.shape[0]:
+                                        #         break
+                                        # update running mean/std for reward_giver
+                                        # if self.reward_giver.normalize:
+                                        #     self.reward_giver.obs_rms.update(
+                                        #         np.array(batch_successor_features)[:,:self.observation_space.shape[0]])
+                                        if self.reward_giver.normalize:
+                                            self.reward_giver.obs_rms.update(np.concatenate((ob_batch, ob_expert), 0))
+
+                                        # Reshape actions if needed when using discrete actions
+                                        if isinstance(self.action_space, gym.spaces.Discrete):
+                                            if len(ac_batch.shape) == 2:
+                                                ac_batch = ac_batch[:, 0]
+                                            if len(ac_expert.shape) == 2:
+                                                ac_expert = ac_expert[:, 0]
+                                        alpha = np.random.uniform(0.0, 1.0, size=(ob_batch.shape[0], 1))
+                                        ob_mix_batch = alpha * ob_batch + (1 - alpha) * ob_expert
+                                        ac_mix_batch = alpha * ac_batch + (1 - alpha) * ac_expert
+                                        with self.sess.as_default():
+                                            # self.reward_giver.train(ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
+                                            #                         ob_expert, ac_expert, np.expand_dims(gamma_expert, axis=1))
+                                            # if (step+1) % 10000 == 0:
+                                            #     self.sess.run(self.reward_giver.update_old_rewards())
+                                            # for _ in range(10):
+                                                self.reward_giver.train(ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
+                                                                    ob_expert, ac_expert, np.expand_dims(gamma_expert, axis=1),
+                                                                    ob_mix_batch, ac_mix_batch)
+                                                # ob_expert, ac_expert = self.expert_dataset.get_next_batch()
+                                                # alpha = np.random.uniform(0.0, 1.0, size=(ob_batch.shape[0], 1))
+                                                # ob_mix_batch = alpha * ob_batch + (1 - alpha) * ob_reg_expert
+                                                # ac_mix_batch = alpha * ac_batch + (1 - alpha) * ac_reg_expert
+                                        # self.sess.run(self.reward_giver.update_old_rewards())
+                                    with self.sess.as_default():
+                                        self.sess.run(self.reward_giver.update_old_rewards())
+
+                                    # d_cycle_length = 10
+                                    # d_step = (d_step + 1) % d_cycle_length
+                                    #
+                                    # if d_step == 0:
+                                    # self.reward_giver.update_old_rewards()
+
                                 # with self.sess.as_default():
                                 #     self.reward_giver.train(ob_batch, ac_batch, np.ones((len(ob_batch), 1), dtype=np.float32),
                                 #                             ob_expert, ac_expert, np.ones((len(ob_expert), 1), dtype=np.float32))
@@ -752,8 +819,7 @@ class MDPO_OFF(OffPolicyRLModel):
                                 if self.update_reward_counter > -10:
                                     self.update_reward_counter = -10
 
-                                batch_size = 20
-                                traj_cutoff = 1 / (1-self.gamma)
+                                batch_size = 100
                                 num_updates = 1
                                 for idx in range(num_updates):
                                     batch_steps = np.random.geometric(1 - self.gamma, batch_size)
@@ -766,8 +832,6 @@ class MDPO_OFF(OffPolicyRLModel):
 
                                     ob_batch = np.zeros((batch_size, self.observation_space.shape[0]))
                                     ac_batch = np.zeros((batch_size, self.n_actions))
-                                    gamma = np.zeros((batch_size * traj_cutoff, 1))
-
 
                                     expert_steps = np.random.geometric(1 - self.gamma, batch_size)
                                     expert_episodes = np.random.randint(self.expert_dataset.num_traj, size=batch_size)
@@ -781,9 +845,8 @@ class MDPO_OFF(OffPolicyRLModel):
                                             batch_step = batch_steps[i]
                                         else:
                                             batch_step = ep_length - 1
-                                        start_idx, end_idx = i * traj_cutoff, (i+1)* traj_cutoff
-                                        ob_batch[start_idx:end_idx] = np.array(features_buffer['obs'][batch_episode][batch_step:batch_step+traj_cutoff])
-                                        # ac_batch[start_idx:end_idx] = np.array(features_buffer['acs'][batch_episode][batch_step++traj_cutoff])
+                                        ob_batch[i] = np.array(features_buffer['obs'][batch_episode][batch_step])
+                                        ac_batch[i] = np.array(features_buffer['acs'][batch_episode][batch_step])
 
                                         expert_episode = expert_episodes[i]
                                         expert_ep_length = len(self.expert_dataset.ep_obs[expert_episode])
@@ -954,17 +1017,6 @@ class MDPO_OFF(OffPolicyRLModel):
                     features_buffer['obs'][-1].append(obs_)
                     features_buffer['acs'][-1].append(action)
                     features_buffer['gammas'][-1].append(self.gamma ** h_step)
-                    if len(batch_buffer['obs']) < self.update_reward_freq:
-                        batch_buffer['obs'].append(obs_)
-                        batch_buffer['acs'].append(action)
-                        batch_buffer['gammas'].append(self.gamma ** h_step)
-
-                    else:
-                        batch_buffer['obs'][batch_idx] = obs_
-                        batch_buffer['acs'][batch_idx] = action
-                        batch_buffer['gammas'][batch_idx] = self.gamma ** h_step
-
-                        batch_idx = (batch_idx + 1) % self.update_reward_freq
 
                     h_step += 1
 

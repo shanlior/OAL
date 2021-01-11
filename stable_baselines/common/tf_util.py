@@ -369,7 +369,7 @@ def intprod(tensor):
     return int(np.prod(tensor))
 
 
-def flatgrad(loss, var_list, clip_norm=None):
+def flatgrad(loss, var_list, clip_norm=None, clip_by_global_norm=False):
     """
     calculates the gradient and flattens it
 
@@ -380,7 +380,10 @@ def flatgrad(loss, var_list, clip_norm=None):
     """
     grads = tf.gradients(loss, var_list)
     if clip_norm is not None:
-        grads = [tf.clip_by_norm(grad, clip_norm=clip_norm) for grad in grads]
+        if clip_by_global_norm:
+            grads, norm = tf.clip_by_global_norm(grads, clip_norm=clip_norm)
+        else:
+            grads = [tf.clip_by_norm(grad, clip_norm=clip_norm) for grad in grads]
     return tf.concat(axis=0, values=[
         tf.reshape(grad if grad is not None else tf.zeros_like(v), [numel(v)])
         for (v, grad) in zip(var_list, grads)

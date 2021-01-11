@@ -37,7 +37,7 @@ class MpiAdam(object):
         self.getflat = tf_utils.GetFlat(var_list, sess=sess)
         self.comm = mpi4py.MPI.COMM_WORLD if comm is None else comm
 
-    def update(self, local_grad, learning_rate):
+    def update(self, local_grad, learning_rate, update_params=True, update_step=True):
         """
         update the values of the graph
 
@@ -52,12 +52,15 @@ class MpiAdam(object):
         if self.scale_grad_by_procs:
             global_grad /= self.comm.Get_size()
 
-        self.step += 1
+
+        if update_step:
+            self.step += 1
         # Learning rate with bias correction
         step_size = learning_rate * np.sqrt(1 - self.beta2 ** self.step) / (1 - self.beta1 ** self.step)
         # Decay the first and second moment running average coefficient
-        self.exp_avg = self.beta1 * self.exp_avg + (1 - self.beta1) * global_grad
-        self.exp_avg_sq = self.beta2 * self.exp_avg_sq + (1 - self.beta2) * (global_grad * global_grad)
+        if update_params:
+            self.exp_avg = self.beta1 * self.exp_avg + (1 - self.beta1) * global_grad
+            self.exp_avg_sq = self.beta2 * self.exp_avg_sq + (1 - self.beta2) * (global_grad * global_grad)
         step = (- step_size) * self.exp_avg / (np.sqrt(self.exp_avg_sq) + self.epsilon)
         self.setfromflat(self.getflat() + step)
 

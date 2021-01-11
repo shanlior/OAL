@@ -103,7 +103,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
     ep_lens = []  # Episode lengths
     features_buffer = {}
     features_buffer['obs'], features_buffer['acs'], features_buffer['gammas'] = [[]], [[]], [[]]
-    update_reward_counter = -11
+    update_reward_counter = 0
     n_features = len(observation) + len(action)
     episode_successor_features = [np.zeros(n_features)]
 
@@ -132,6 +132,10 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
         if step > 0 and step % horizon == 0:
             callback.update_locals(locals())
             callback.on_rollout_end()
+            # if update_reward_counter > -10:
+            update_reward_counter = -10
+            # update_reward_counter = -5
+
             if mdal:
                 yield {
                         "observations": observations,
@@ -179,6 +183,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
             # Reset current iteration length
             current_it_len = 0
             callback.on_rollout_start()
+            update_reward_counter = 0
         i = step % horizon
         observations[i] = observation
         vpreds[i] = vpred[0]
@@ -191,10 +196,7 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
         if isinstance(env.action_space, gym.spaces.Box):
             clipped_action = np.clip(action, env.action_space.low, env.action_space.high)
 
-        if gail:
-            reward = reward_giver.get_reward(observation, clipped_action[0])
-            observation, true_reward, done, info = env.step(clipped_action[0])
-        elif mdal:
+        if gail or mdal:
             reward = reward_giver.get_reward(observation, clipped_action[0])
             observation, true_reward, done, info = env.step(clipped_action[0])
         else:
@@ -270,6 +272,8 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
                 features_buffer['obs'].append([])
                 features_buffer['acs'].append([])
                 features_buffer['gammas'].append([])
+            update_reward_counter -= 1
+
 
             ep_rets.append(cur_ep_ret)
             ep_true_rets.append(cur_ep_true_ret)
@@ -281,7 +285,6 @@ def traj_segment_generator(policy, env, horizon, reward_giver=None, gail=False, 
                 observation = env.reset()
         else:
             if mdal:
-
                 concat_obs = np.concatenate((observation, action[0]), axis=0)
                 episode_successor_features[-1] = np.add(episode_successor_features[-1],
                                                         (1 - gamma) * (gamma ** h_step) * concat_obs)

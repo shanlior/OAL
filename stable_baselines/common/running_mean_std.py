@@ -36,6 +36,7 @@ class RunningMeanStd(object):
         self.var = new_var
         self.count = new_count
 
+
 class RunningMinMax(object):
     def __init__(self, epsilon=1e-5, shape=()):
         """

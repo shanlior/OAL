@@ -15,7 +15,8 @@ from stable_baselines.common.mpi_adam import MpiAdam
 from stable_baselines.common.misc_util import flatten_lists
 from stable_baselines.common.policies import ActorCriticPolicy
 from stable_baselines.common.tf_util import total_episode_reward_logger
-from stable_baselines.mdpo.utils import traj_segment_generator
+# from stable_baselines.mdpo.utils import traj_segment_generator
+from stable_baselines.common.runners import traj_segment_generator
 from stable_baselines.trpo_mpi.utils import add_vtarg_and_adv, add_successor_features
 
 # from stable_baselines.sac_trpo.tf_tsallis_statistics import *
@@ -120,7 +121,7 @@ class MDPO_ON(ActorCriticRLModel):
     def setup_model(self):
         # prevent import loops
         from stable_baselines.gail.adversary import TransitionClassifier
-        from stable_baselines.mdal.adversary import TabularAdversaryTF
+        from stable_baselines.mdal.adversary import TabularAdversaryTF, NeuralAdversaryTRPO
 
 
         with SetVerbosity(self.verbose):
@@ -138,22 +139,25 @@ class MDPO_ON(ActorCriticRLModel):
                 # self._setup_learn(self.seed)
                 self._setup_learn()
 
-
                 if self.using_gail:
                     self.reward_giver = TransitionClassifier(self.observation_space, self.action_space,
                                                              self.hidden_size_adversary,
                                                              entcoeff=self.adversary_entcoeff)
-                if self.using_mdal:
-                    self.reward_giver = TabularAdversaryTF(self.sess, self.observation_space, self.action_space,
-                                                             self.hidden_size_adversary,
-                                                             entcoeff=self.adversary_entcoeff,
-                                                             expert_features=self.expert_dataset.successor_features,
-                                                             exploration_bonus=self.exploration_bonus,
-                                                             bonus_coef=self.bonus_coef,
-                                                             t_c=self.t_c,
-                                                             is_action_features=self.is_action_features)
+                elif self.using_mdal:
+                    if self.neural:
+                        self.reward_giver = NeuralAdversaryTRPO(self.sess, self.observation_space, self.action_space,
+                                                                self.hidden_size_adversary,
+                                                                entcoeff=self.adversary_entcoeff)
+                    else:
+                        self.reward_giver = TabularAdversaryTF(self.sess, self.observation_space, self.action_space,
+                                                                 self.hidden_size_adversary,
+                                                                 entcoeff=self.adversary_entcoeff,
+                                                                 expert_features=self.expert_dataset.successor_features,
+                                                                 exploration_bonus=self.exploration_bonus,
+                                                                 bonus_coef=self.bonus_coef,
+                                                                 t_c=self.t_c,
+                                                                 is_action_features=self.is_action_features)
                 # Construct network for new policy
-
                 self.policy_pi = self.policy(self.sess, self.observation_space, self.action_space, self.n_envs, 1,
                                              None, reuse=False, **self.policy_kwargs)
 
@@ -267,7 +271,7 @@ class MDPO_ON(ActorCriticRLModel):
                     grads = tf.gradients(-optimgain, var_list)
                     grads, _grad_norm = tf.clip_by_global_norm(grads, 0.5)
                     trainer = tf.train.AdamOptimizer(learning_rate=self.outer_learning_rate_ph, epsilon=1e-5)
-                    #trainer = tf.train.AdamOptimizer(learning_rate=3e-4, epsilon=1e-5)
+                    # trainer = tf.train.AdamOptimizer(learning_rate=3e-4, epsilon=1e-5)
                     grads = list(zip(grads, var_list))
                     self._train = trainer.apply_gradients(grads)
 
@@ -297,7 +301,7 @@ class MDPO_ON(ActorCriticRLModel):
 
                 with tf.variable_scope("Adam_mpi", reuse=False):
                     self.vfadam = MpiAdam(vf_var_list, sess=self.sess)
-                    if self.using_gail:
+                    if self.using_gail or self.using_mdal:
                         self.d_adam = MpiAdam(self.reward_giver.get_trainable_variables(), sess=self.sess)
                         self.d_adam.sync()
                     self.vfadam.sync()
@@ -339,17 +343,20 @@ class MDPO_ON(ActorCriticRLModel):
               reset_num_timesteps=True):
 
         new_tb_log = self._init_num_timesteps(reset_num_timesteps)
+        callback = self._init_callback(callback)
         print("got seed {}, sgd_steps {}".format(seed, self.sgd_steps))
 
         with SetVerbosity(self.verbose), TensorboardWriter(self.graph, self.tensorboard_log, tb_log_name, new_tb_log) \
                 as writer:
 
             with self.sess.as_default():
+                callback.on_training_start(locals(), globals())
+
                 seg_gen = traj_segment_generator(self.old_policy, self.env, self.timesteps_per_batch,
                                                      reward_giver=self.reward_giver,
-                                                     gail=self.using_gail, mdal=self.using_mdal,
-                                                     action_space=self.action_space,
-                                                     entcoeff=self.entcoeff)
+                                                     gail=self.using_gail, mdal=self.using_mdal, neural=self.neural,
+                                                     action_space=self.action_space, gamma=self.gamma, callback=callback)
+
 
                 episodes_so_far = 0
                 timesteps_so_far = 0
@@ -377,11 +384,11 @@ class MDPO_ON(ActorCriticRLModel):
                     #  ep_stats = Stats(["True_rewards", "Rewards", "Episode_length"])
 
                 while True:
-                    if callback is not None:
-                        # Only stop training if return value is False, not when it is None. This is for backwards
-                        # compatibility with callbacks that have no return statement.
-                        if callback(locals(), globals()) is False:
-                            break
+                    # if callback is not None:
+                    #     # Only stop training if return value is False, not when it is None. This is for backwards
+                    #     # compatibility with callbacks that have no return statement.
+                    #     if callback(locals(), globals()) is False:
+                    #         break
                     if total_timesteps and timesteps_so_far >= total_timesteps:
                         break
 
@@ -402,6 +409,9 @@ class MDPO_ON(ActorCriticRLModel):
                     for k in range(self.g_step):
                         with self.timed("sampling"):
                             seg = seg_gen.__next__()
+                        if not seg.get('continue_training', True):  # pytype: disable=attribute-error
+                            break
+
                         add_vtarg_and_adv(seg, self.gamma, self.lam)
                         if self.using_mdal:
                             policy_successor_features = add_successor_features(seg, self.gamma,
@@ -414,7 +424,7 @@ class MDPO_ON(ActorCriticRLModel):
 
 
                         vpredbefore = seg["vpred"]  # predicted value function before update
-                        atarg = (atarg - atarg.mean()) / (atarg.std() + 1e-8)  # standardized advantage function estimate
+                        atarg = (atarg - atarg.mean()) / atarg.std()  # standardized advantage function estimate
 
                         # true_rew is the reward without discount
                         if writer is not None:
@@ -455,7 +465,6 @@ class MDPO_ON(ActorCriticRLModel):
                                                                                 sess=self.sess,
                                                                                 options=run_options,
                                                                                 run_metadata=run_metadata)
-
                                 td_map = {self.policy_pi.obs_ph: seg["observations"],
                                             self.old_policy.obs_ph: seg["observations"],
                                             self.closed_policy.obs_ph: seg["observations"],
@@ -524,40 +533,115 @@ class MDPO_ON(ActorCriticRLModel):
                             d_losses.append(newlosses)
                         logger.log(fmt_row(13, np.mean(d_losses, axis=0)))
 
-                        # lr: lengths and rewards
-                        lr_local = (seg["ep_lens"], seg["ep_rets"], seg["ep_true_rets"])  # local values
-                        list_lr_pairs = MPI.COMM_WORLD.allgather(lr_local)  # list of tuples
-                        lens, rews, true_rets = map(flatten_lists, zip(*list_lr_pairs))
-                        true_reward_buffer.extend(true_rets)
-
                     elif self.using_mdal:
-                        batch_size = self.timesteps_per_batch // self.d_step
+                        batch_sampling = True
 
-                        # NOTE: uses only the last g step for observation
-                        d_losses = []  # list of tuples, each of which gives the loss for a minibatch
-                        # NOTE: for recurrent policies, use shuffle=False?
-                        for ob_batch, ac_batch in dataset.iterbatches((observation, action),
-                                                                      include_final_partial_batch=False,
-                                                                      batch_size=batch_size,
-                                                                      shuffle=True):
-                            ob_expert, ac_expert = self.expert_dataset.get_next_batch()
-                            # update running mean/std for reward_giver
-                            features_batch = np.concatenate((ob_batch, ac_batch), axis=1)
-                            features_expert = np.concatenate((ob_expert, ac_expert), axis=1)
-                            if self.reward_giver.normalize:
-                                self.reward_giver.obs_rms.update(np.concatenate((features_batch, features_expert), axis=0))
+                        if self.neural:
 
-                            # logger.log("Optimizing Rewards...")
-                            self.reward_giver.update_reward(policy_successor_features)
+                            if batch_sampling:
+                                batch_size = self.timesteps_per_batch // self.d_step
 
+                                # NOTE: uses only the last g step for observation
+                                d_losses = []  # list of tuples, each of which gives the loss for a minibatch
+                                # NOTE: for recurrent policies, use shuffle=False?
+                                for ob_batch, ac_batch in dataset.iterbatches((observation, action),
+                                                                              include_final_partial_batch=False,
+                                                                              batch_size=batch_size,
+                                                                              shuffle=True):
+                                # ob_batch, ac_batch, gamma_batch = np.array(batch_buffer['obs']), np.array(
+                                #     batch_buffer['acs']), np.array(batch_buffer['gammas'])
+                                    gamma_batch = np.ones((ob_batch.shape[0]))
+                                    ob_expert, ac_expert = self.expert_dataset.get_next_batch()
+                                    gamma_expert = np.ones((ob_expert.shape[0]))
+                                    # ob_expert, ac_expert, gamma_expert = np.concatenate(self.expert_dataset.ep_obs),\
+                                    #                                      np.concatenate(self.expert_dataset.ep_acs),\
+                                    #                                      np.concatenate(self.expert_dataset.ep_gammas)
+
+                                    # update running mean/std for reward_giver
+                                    if self.reward_giver.normalize:
+                                        self.reward_giver.obs_rms.update(np.concatenate((ob_batch, ob_expert), 0))
+
+                                    # Reshape actions if needed when using discrete actions
+                                    if isinstance(self.action_space, gym.spaces.Discrete):
+                                        if len(ac_batch.shape) == 2:
+                                            ac_batch = ac_batch[:, 0]
+                                        if len(ac_expert.shape) == 2:
+                                            ac_expert = ac_expert[:, 0]
+
+                                    ob_reg_expert, ac_reg_expert = np.array(ob_expert), np.array(ac_expert)
+
+                                    # while True:
+                                    #     if ob_reg_expert.shape[0] == ob_batch.shape[0] and ac_reg_expert.shape[0] == \
+                                    #             ac_batch.shape[0]:
+                                    #         break
+                                    #     ob_reg_expert, ac_reg_expert = self.expert_dataset.get_next_batch()
+                                    #     ob_reg_expert, ac_reg_expert = np.array(ob_reg_expert), np.array(ac_reg_expert)
+
+
+                                    alpha = np.random.uniform(0.0, 1.0, size=(ob_reg_expert.shape[0], 1))
+                                    ob_mix_batch = alpha * ob_batch[:ob_reg_expert.shape[0]] + (1 - alpha) * ob_reg_expert
+                                    ac_mix_batch = alpha * ac_batch[:ac_reg_expert.shape[0]] + (1 - alpha) * ac_reg_expert
+                                    with self.sess.as_default():
+                                        # self.reward_giver.train(ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
+                                        #                         ob_expert, ac_expert, np.expand_dims(gamma_expert, axis=1))
+                                        *newlosses, grad = self.reward_giver.lossandgrad(
+                                                                ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
+                                                                ob_expert, ac_expert, np.expand_dims(gamma_expert, axis=1),
+                                                                ob_mix_batch, ac_mix_batch)
+                                        self.d_adam.update(self.allmean(grad), self.d_stepsize)
+                            else:
+                                # assert len(observation) == self.timesteps_per_batch
+                                # Comment out if you want only the latest rewards:
+                                obs_batch, acs_batch, gammas_batch = seg['obs_batch'], seg['acs_batch'], seg['gammas_batch']
+                                batch_successor_features = seg['successor_features_batch']
+
+
+                                if self.reward_giver.normalize:
+                                    ob_reg_batch, ac_reg_batch = observation, action
+                                    ob_expert, _ = self.expert_dataset.get_next_batch()
+                                    self.reward_giver.obs_rms.update(np.concatenate((ob_reg_batch, ob_expert), 0))
+                                #     self.reward_giver.obs_rms.update(
+                                #         np.array(batch_successor_features)[:, :self.observation_space.shape[0]])
+
+                                for idx, (ob_batch, ac_batch, gamma_batch) in enumerate(
+                                        zip(obs_batch, acs_batch, gammas_batch)):
+                                    rand_traj = np.random.randint(self.expert_dataset.num_traj)
+                                    ob_expert, ac_expert, gamma_expert = self.expert_dataset.ep_obs[rand_traj], \
+                                                                         self.expert_dataset.ep_acs[rand_traj], \
+                                                                         self.expert_dataset.ep_gammas[rand_traj]
+
+                                    ob_batch, ac_batch, gamma_batch = np.array(ob_batch), np.array(ac_batch), np.array(
+                                        gamma_batch)
+
+                                    while True:
+                                        ob_reg_expert, ac_reg_expert = self.expert_dataset.get_next_batch()
+                                        ob_reg_expert, ac_reg_expert = np.array(ob_reg_expert), np.array(ac_reg_expert)
+
+                                        if ob_reg_expert.shape[0] == ob_reg_batch.shape[0] and ac_reg_expert.shape[0] == \
+                                                ac_reg_batch.shape[0]:
+                                            break
+                                    alpha = np.random.uniform(0.0, 1.0, size=(ob_reg_batch.shape[0], 1))
+                                    ob_mix_batch = alpha * ob_reg_batch + (1 - alpha) * ob_reg_expert
+                                    ac_mix_batch = alpha * ac_reg_batch + (1 - alpha) * ac_reg_expert
+
+                                    with self.sess.as_default():
+                                        *newlosses, grad = self.reward_giver.lossandgrad(
+                                                                ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
+                                                                ob_expert, ac_expert, np.expand_dims(gamma_expert, axis=1),
+                                                                ob_mix_batch, ac_mix_batch)
+                                        self.d_adam.update(self.allmean(grad), self.d_stepsize)
+                                        # self.reward_giver.train(ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
+                                        #                         ob_expert, ac_expert,
+                                        #                         np.expand_dims(gamma_expert, axis=1),
+                                        #                         ob_mix_batch, ac_mix_batch)
+
+                    if self.using_gail or self.using_mdal:
                         # lr: lengths and rewards
                         lr_local = (seg["ep_lens"], seg["ep_rets"], seg["ep_true_rets"])  # local values
                         list_lr_pairs = MPI.COMM_WORLD.allgather(lr_local)  # list of tuples
                         lens, rews, true_rets = map(flatten_lists, zip(*list_lr_pairs))
                         true_reward_buffer.extend(true_rets)
-
                     else:
-                        # lr: lengths and rewards
                         lr_local = (seg["ep_lens"], seg["ep_rets"])  # local values
                         list_lr_pairs = MPI.COMM_WORLD.allgather(lr_local)  # list of tuples
                         lens, rews = map(flatten_lists, zip(*list_lr_pairs))
@@ -565,10 +649,13 @@ class MDPO_ON(ActorCriticRLModel):
                     reward_buffer.extend(rews)
 
                     if len(len_buffer) > 0:
-                        logger.record_tabular("EpLenMean", np.mean(len_buffer))
+                        if self.using_gail or self.using_mdal:
+                            logger.record_tabular("EpTrueRewMean", np.mean(true_reward_buffer))
+
                         logger.record_tabular("EpRewMean", np.mean(reward_buffer))
-                    if self.using_gail or self.using_mdal:
-                        logger.record_tabular("EpTrueRewMean", np.mean(true_reward_buffer))
+                        logger.record_tabular("EpLenMean", np.mean(len_buffer))
+
+
                     logger.record_tabular("EpThisIter", len(lens))
                     episodes_so_far += len(lens)
                     current_it_timesteps = MPI.COMM_WORLD.allreduce(seg["total_timestep"])
@@ -585,6 +672,7 @@ class MDPO_ON(ActorCriticRLModel):
 
                     if self.verbose >= 1 and self.rank == 0:
                         logger.dump_tabular()
+        callback.on_training_end()
 
         return self
 
