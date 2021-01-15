@@ -145,7 +145,7 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, lam, log, exp
             elif algo == 'MDAL_TRPO':
                 model = MDAL_TRPO('MlpPolicy', env, dataset, verbose=1,
                                       tensorboard_log="./experiments/" + env_name + "/mdal_trpo/", seed=seed,
-                                      gamma=0.99, g_step=3, d_step=1, sgd_steps=1, d_stepsize=9e-5,
+                                      gamma=0.99, g_step=3, d_step=10, sgd_steps=1, d_stepsize=9e-5,
                                       entcoeff=0.0, adversary_entcoeff=0.001, max_kl=t_pi, t_pi=t_pi, t_c=t_c,
                                       exploration_bonus=exploration_bonus, bonus_coef=bonus_coef,
                                       is_action_features=is_action_features, neural=neural, lam=0.98,

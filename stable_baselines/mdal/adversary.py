@@ -1073,7 +1073,7 @@ class NeuralAdversaryMD(object):
         # bregman = tf.reduce_mean(tf_util.huber_loss(old_clipped_rewards - rewards))
         bregman = tf.reduce_mean(tf.square(tf.stop_gradient(old_clipped_rewards) - rewards))
 
-        bregman_coeff = 0
+        bregman_coeff = 100
         bregman_loss = bregman_coeff * bregman
 
         #

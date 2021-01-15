@@ -292,7 +292,10 @@ class TRPO(ActorCriticRLModel):
 
     def _initialize_dataloader(self):
         """Initialize dataloader."""
-        batchsize = self.timesteps_per_batch // self.d_step
+        if self.using_mdal and self.neural:
+            batchsize = (self.g_step * self.timesteps_per_batch) // self.d_step
+        else:
+            batchsize = self.timesteps_per_batch // self.d_step
         # batchsize = self.timesteps_per_batch * self.g_step
 
         self.expert_dataset.init_dataloader(batchsize)
@@ -378,10 +381,10 @@ class TRPO(ActorCriticRLModel):
 
                         # ob, ac, atarg, ret, td1ret = map(np.concatenate, (obs, acs, atargs, rets, td1rets))
                         observation, action = seg["observations"], seg["actions"]
-                        # if k > 0:
-                        #     obs_batch, acs_batch = np.concatenate([obs_batch, observation], axis=0), np.concatenate([acs_batch, action], axis=0)
-                        # else:
-                        obs_batch, acs_batch = observation, action
+                        if k > 0:
+                            obs_batch, acs_batch = np.concatenate([obs_batch, observation], axis=0), np.concatenate([acs_batch, action], axis=0)
+                        else:
+                            obs_batch, acs_batch = observation, action
                         atarg, tdlamret = seg["adv"], seg["tdlamret"]
                         # if self.using_mdal:
                         #     covariance_lambda = seg["covariance_lambda"]
@@ -525,7 +528,7 @@ class TRPO(ActorCriticRLModel):
                         if self.neural:
 
                             if batch_sampling:
-                                batch_size = self.timesteps_per_batch // self.d_step
+                                batch_size = (self.g_step * self.timesteps_per_batch) // self.d_step
                                 # batch_size = obs_batch.shape[0]
                                 # NOTE: uses only the last g step for observation
                                 d_losses = []  # list of tuples, each of which gives the loss for a minibatch
@@ -536,7 +539,7 @@ class TRPO(ActorCriticRLModel):
                                 self.d_adam.sync()
 
                                 update_step = True
-                                for ob_batch, ac_batch in dataset.iterbatches((observation, action),
+                                for ob_batch, ac_batch in dataset.iterbatches((obs_batch, acs_batch),
                                                                               include_final_partial_batch=False,
                                                                               batch_size=batch_size,
                                                                               shuffle=True):

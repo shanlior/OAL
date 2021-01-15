@@ -205,7 +205,7 @@ class MDPO_OFF(OffPolicyRLModel):
                                                              entcoeff=self.adversary_entcoeff)
                 elif self.using_mdal:
                     if self.neural:
-                        self.reward_giver = NeuralAdversaryMDPO(self.sess, self.observation_space, self.action_space,
+                        self.reward_giver = NeuralAdversary (self.sess, self.observation_space, self.action_space,
                                                             self.hidden_size_adversary, normalize=True)
 
                     else:
@@ -739,8 +739,8 @@ class MDPO_OFF(OffPolicyRLModel):
                                     # NOTE: uses only the last g step for observation
                                     d_losses = []  # list of tuples, each of which gives the loss for a minibatch
                                     # NOTE: for recurrent policies, use shuffle=False?
-                                    with self.sess.as_default():
-                                        self.sess.run(self.reward_giver.update_old_rewards())
+                                    # with self.sess.as_default():
+                                    #     self.sess.run(self.reward_giver.update_old_rewards())
 
                                     for ob_batch, ac_batch in dataset.iterbatches((batch_buffer['obs'], batch_buffer['acs']),
                                                                                   include_final_partial_batch=False,
@@ -794,8 +794,8 @@ class MDPO_OFF(OffPolicyRLModel):
                                                 # ob_mix_batch = alpha * ob_batch + (1 - alpha) * ob_reg_expert
                                                 # ac_mix_batch = alpha * ac_batch + (1 - alpha) * ac_reg_expert
                                         # self.sess.run(self.reward_giver.update_old_rewards())
-                                    with self.sess.as_default():
-                                        self.sess.run(self.reward_giver.update_old_rewards())
+                                    # with self.sess.as_default():
+                                    #     self.sess.run(self.reward_giver.update_old_rewards())
 
                                     # d_cycle_length = 10
                                     # d_step = (d_step + 1) % d_cycle_length
