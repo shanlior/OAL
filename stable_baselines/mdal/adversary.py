@@ -397,7 +397,8 @@ class NeuralAdversary(object):
         self.loss_name = ["generator_loss", "expert_loss", "entropy", "entropy_loss", "generator_acc", "expert_acc"]
         # self.total_loss = loss
         # Build Reward for policy
-        self.reward_op = tf.stop_gradient(policy_rewards)
+        self.reward_op = tf.clip_by_value(policy_rewards, -10.0, 10.0)
+        # self.reward_op = tf.stop_gradient(policy_rewards)
         # self.reward_op = generator_rewards
 
 
