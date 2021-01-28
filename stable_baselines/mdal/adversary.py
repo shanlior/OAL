@@ -973,7 +973,7 @@ class NeuralAdversaryMDPO(object):
         return reward
 
 class NeuralAdversaryMD(object):
-    def __init__(self, sess, observation_space, action_space, hidden_size=64, entcoeff=0.001, lipschitz_reg_coef=0.0
+    def __init__(self, sess, observation_space, action_space, hidden_size=64, entcoeff=0.001, lipschitz_reg_coef=0.0,
                  scope="adversary", normalize=True):
         """
         Reward regression from observations and transitions
