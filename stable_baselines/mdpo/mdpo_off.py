@@ -202,12 +202,13 @@ class MDPO_OFF(OffPolicyRLModel):
                 if self.using_gail:
                     self.reward_giver = TransitionClassifierMDPO(self.sess, self.observation_space, self.action_space,
                                                              self.hidden_size_adversary,
-                                                             entcoeff=self.adversary_entcoeff, lipschitz=self.lipschitz)
+                                                             entcoeff=self.adversary_entcoeff,
+                                                             lipschitz_reg_coef=self.lipschitz)
                 elif self.using_mdal:
                     if self.neural:
-                        self.reward_giver = NeuralAdversary (self.sess, self.observation_space, self.action_space,
+                        self.reward_giver = NeuralAdversary(self.sess, self.observation_space, self.action_space,
                                                             self.hidden_size_adversary, normalize=True,
-                                                            lipschitz=self.lipschitz)
+                                                            lipschitz_reg_coef=self.lipschitz)
 
                     else:
                         self.reward_giver = TabularAdversaryTF(self.sess, self.observation_space, self.action_space,
