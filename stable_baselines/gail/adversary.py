@@ -238,7 +238,7 @@ class TransitionClassifier(object):
 
 class TransitionClassifierMDPO(object):
     def __init__(self, sess, observation_space, action_space, hidden_size,
-                 entcoeff=0.001, scope="adversary", normalize=True):
+                 entcoeff=0.001, scope="adversary", lipschitz_reg_coef=0.0, normalize=True):
         """
         Reward regression from observations and transitions
 
@@ -293,6 +293,18 @@ class TransitionClassifierMDPO(object):
         expert_loss = tf.nn.sigmoid_cross_entropy_with_logits(logits=expert_logits,
                                                               labels=tf.ones_like(expert_logits))
         expert_loss = tf.reduce_mean(expert_loss)
+
+        # Build Lipschitz loss
+        self.mix_obs_ph = tf.placeholder(observation_space.dtype, (None,) + self.observation_shape,
+                                            name="expert_observations_ph")
+        self.mix_acs_ph = tf.placeholder(action_space.dtype, (None,) + self.actions_shape,
+                                            name="expert_actions_ph")
+        mixture_rewards = self.build_graph(self.mix_obs_ph, self.mix_acs_ph, reuse=True)
+        grads = tf.gradients(mixture_rewards, [self.mix_obs_ph, self.mix_acs_ph])[0]
+        norm = tf.cast(tf.sqrt(tf.reduce_sum(tf.square(grads), axis=1)), tf.float32)
+        lipschitz_reg = tf.reduce_mean(tf.square(norm - 1.0))
+        lipschitz_reg_loss = lipschitz_reg_coef * lipschitz_reg
+
         # Build entropy loss
         logits = tf.concat([generator_logits, expert_logits], 0)
         entropy = tf.reduce_mean(logit_bernoulli_entropy(logits))
@@ -300,7 +312,7 @@ class TransitionClassifierMDPO(object):
         # Loss + Accuracy terms
         self.losses = [generator_loss, expert_loss, entropy, entropy_loss, generator_acc, expert_acc]
         self.loss_name = ["generator_loss", "expert_loss", "entropy", "entropy_loss", "generator_acc", "expert_acc"]
-        self.total_loss = generator_loss + expert_loss + entropy_loss
+        self.total_loss = generator_loss + expert_loss + entropy_loss + lipschitz_reg_loss
         # Build Reward for policy
         self.reward_op = -tf.log(1 - tf.nn.sigmoid(generator_logits) + 1e-8)
         var_list = self.get_trainable_variables()

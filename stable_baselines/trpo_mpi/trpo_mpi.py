@@ -143,7 +143,8 @@ class TRPO(ActorCriticRLModel):
                     if self.neural:
                         self.reward_giver = NeuralAdversaryMD(self.sess, self.observation_space, self.action_space,
                                                                 self.hidden_size_adversary,
-                                                                entcoeff=self.adversary_entcoeff)
+                                                                entcoeff=self.adversary_entcoeff,
+                                                                lipschitz_reg_coef=self.lipschitz)
                     else:
                         self.reward_giver = TabularAdversaryTF(self.sess, self.observation_space, self.action_space,
                                                                  self.hidden_size_adversary,

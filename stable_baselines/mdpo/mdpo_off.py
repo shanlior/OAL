@@ -202,11 +202,12 @@ class MDPO_OFF(OffPolicyRLModel):
                 if self.using_gail:
                     self.reward_giver = TransitionClassifierMDPO(self.sess, self.observation_space, self.action_space,
                                                              self.hidden_size_adversary,
-                                                             entcoeff=self.adversary_entcoeff)
+                                                             entcoeff=self.adversary_entcoeff, lipschitz=self.lipschitz)
                 elif self.using_mdal:
                     if self.neural:
                         self.reward_giver = NeuralAdversary (self.sess, self.observation_space, self.action_space,
-                                                            self.hidden_size_adversary, normalize=True)
+                                                            self.hidden_size_adversary, normalize=True,
+                                                            lipschitz=self.lipschitz)
 
                     else:
                         self.reward_giver = TabularAdversaryTF(self.sess, self.observation_space, self.action_space,
@@ -693,6 +694,7 @@ class MDPO_OFF(OffPolicyRLModel):
                         ob_batch, ac_batch = batch_buffer['obs'], batch_buffer['acs']
                         ob_expert, ac_expert = self.expert_dataset.get_next_batch()
                         # update running mean/std for reward_giver
+
                         if self.reward_giver.normalize:
                             self.reward_giver.obs_rms.update(np.concatenate((ob_batch, ob_expert), 0))
 
@@ -703,8 +705,18 @@ class MDPO_OFF(OffPolicyRLModel):
                             if len(ac_expert.shape) == 2:
                                 ac_expert = ac_expert[:, 0]
 
+                        alpha = np.random.uniform(0.0, 1.0, size=(ob_batch.shape[0], 1))
+                        ob_mix_batch = alpha * ob_batch + (1 - alpha) * ob_expert
+                        ac_mix_batch = alpha * ac_batch + (1 - alpha) * ac_expert
                         with self.sess.as_default():
-                            self.reward_giver.train(ob_batch, ac_batch, ob_expert, ac_expert)
+                            # self.reward_giver.train(ob_batch, ac_batch, np.expand_dims(gamma_batch, axis=1),
+                            #                         ob_expert, ac_expert, np.expand_dims(gamma_expert, axis=1))
+                            # if (step+1) % 10000 == 0:
+                            #     self.sess.run(self.reward_giver.update_old_rewards())
+                            # for _ in range(10):
+                            self.reward_giver.train(ob_batch, ac_batch, ob_expert, ac_expert, ob_mix_batch, ac_mix_batch)
+                        # with self.sess.as_default():
+                        #     self.reward_giver.train(ob_batch, ac_batch, ob_expert, ac_expert)
                         # *newlosses, grad = self.reward_giver.lossandgrad(ob_batch, ac_batch, ob_expert, ac_expert)
                         # self.d_adam.update(self.allmean(grad), self.d_stepsize)
                         # d_losses.append(newlosses)

@@ -19,7 +19,7 @@ import os
 
 def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, lam, log, expert_path, pretrain, pretrain_epochs,
           mdpo_update_steps, num_trajectories, expert_model, exploration_bonus, bonus_coef, random_action_len,
-          is_action_features, dir_name, neural, args):
+          is_action_features, dir_name, neural, lipschitz, args):
     """
     Train TRPO model for the mujoco environment, for testing purposes
     :param env_id: (str) Environment ID
@@ -131,7 +131,7 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, lam, log, exp
                                       lam=0.0, train_freq=1, d_step=10, tsallis_q=1, reparameterize=True, t_pi=t_pi, t_c=t_c,
                                       exploration_bonus=exploration_bonus, bonus_coef=bonus_coef,
                                       is_action_features=is_action_features,
-                                      neural=neural)
+                                      neural=neural, lipschitz=lipschitz)
             elif algo == 'MDAL_ON_POLICY':
                 model = MDAL_MDPO_ON('MlpPolicy', env, dataset, verbose=1, timesteps_per_batch=2048,
                                       tensorboard_log="./experiments/" + env_name + "/mdal_mdpo_on/", seed=seed,
@@ -145,11 +145,11 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, lam, log, exp
             elif algo == 'MDAL_TRPO':
                 model = MDAL_TRPO('MlpPolicy', env, dataset, verbose=1,
                                       tensorboard_log="./experiments/" + env_name + "/mdal_trpo/", seed=seed,
-                                      gamma=0.99, g_step=3, d_step=10, sgd_steps=1, d_stepsize=9e-5,
+                                      gamma=0.99, g_step=3, d_step=0, sgd_steps=1, d_stepsize=9e-5,
                                       entcoeff=0.0, adversary_entcoeff=0.001, max_kl=t_pi, t_pi=t_pi, t_c=t_c,
                                       exploration_bonus=exploration_bonus, bonus_coef=bonus_coef,
                                       is_action_features=is_action_features, neural=neural, lam=0.98,
-                                      timesteps_per_batch=2000)
+                                      timesteps_per_batch=2000, lipschitz=lipschitz)
 
             elif algo == 'GAIL':
                 from mpi4py import MPI
@@ -157,7 +157,8 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, lam, log, exp
 
                 model = GAIL('MlpPolicy', env, dataset, verbose=1,
                              tensorboard_log="./experiments/" + env_name + "/gail/", seed=seed,
-                             entcoeff=0.0, adversary_entcoeff=0.001)
+                             entcoeff=0.0, adversary_entcoeff=0.001, lipschitz=lipschitz)
+
             elif algo == 'GAIL_MDPO_OFF':
                 # from mpi4py import MPI
                 from stable_baselines import GAIL_MDPO_OFF
@@ -170,7 +171,7 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, lam, log, exp
                                         gamma=0.99, gradient_steps=sgd_steps, mdpo_update_steps=mdpo_update_steps,
                                         lam=0.0, train_freq=1, tsallis_q=1, reparameterize=True, t_pi=t_pi, t_c=t_c,
                                         exploration_bonus=exploration_bonus, bonus_coef=bonus_coef,
-                                        is_action_features=is_action_features)
+                                        is_action_features=is_action_features, lipschitz=lipschitz)
             else:
                 raise ValueError("Not a valid algorithm.")
 
@@ -205,7 +206,7 @@ def main():
         train(args.env, algo=args.algo, num_timesteps=args.num_timesteps, seed=(seed+args.seed_offset),
               expert_model=args.expert_model, expert_path=args.expert_path, num_trajectories=args.num_trajectories,
               is_action_features=is_action_features,
-              sgd_steps=args.sgd_steps, mdpo_update_steps=args.mdpo_update_steps,
+              sgd_steps=args.sgd_steps, mdpo_update_steps=args.mdpo_update_steps, lipschitz=args.lipschitz
               t_pi=args.t_pi, t_c=args.t_c, lam=args.lam, log=log,
               pretrain=args.pretrain, pretrain_epochs=args.pretrain_epochs,
               exploration_bonus=args.exploration, bonus_coef=args.bonus_coef,

@@ -300,7 +300,7 @@ class TabularAdversaryTF(object):
 
 
 class NeuralAdversary(object):
-    def __init__(self, sess, observation_space, action_space, hidden_size=64, scope="adversary", normalize=True):
+    def __init__(self, sess, observation_space, action_space, hidden_size=64, lipschitz_reg_coef=1.0, scope="adversary", normalize=True):
         """
         Reward regression from observations and transitions
 
@@ -377,9 +377,8 @@ class NeuralAdversary(object):
         mixture_rewards = self.build_graph(self.mix_obs_ph, self.mix_acs_ph, reuse=True)
         grads = tf.gradients(mixture_rewards, [self.mix_obs_ph, self.mix_acs_ph])[0]
         norm = tf.cast(tf.sqrt(tf.reduce_sum(tf.square(grads), axis=1)), tf.float32)
-        grad_reg = tf.reduce_mean(tf.square(norm - 1.0))
-        grad_reg_coef = 1.0
-        grad_reg_loss = grad_reg_coef * grad_reg
+        lipschitz_reg = tf.reduce_mean(tf.square(norm - 1.0))
+        lipschitz_reg_loss = lipschitz_reg_coef * lipschitz_reg
 
         rewards = tf.concat([policy_rewards, expert_rewards], 0)
 
@@ -391,7 +390,7 @@ class NeuralAdversary(object):
 
         rewards_reg_loss = rewards_reg_coef * rewards_reg
         policy_loss = policy_value - expert_value
-        loss = policy_loss + grad_reg_loss + rewards_reg_loss
+        loss = policy_loss + lipschitz_reg_loss + rewards_reg_loss
 
         # Loss + Accuracy terms
         self.losses = [loss]
@@ -437,7 +436,7 @@ class NeuralAdversary(object):
         #     [self.generator_obs_ph, self.generator_acs_ph, self.generator_gammas_ph,
         #      self.expert_obs_ph, self.expert_acs_ph, self.expert_gammas_ph], accumulate_ops)
         # self.train = tf_util.function([], train_step)
-        # print_op = tf.print("Value diff:", policy_value - expert_value, "Grad Regularizer:", grad_reg)
+        # print_op = tf.print("Value diff:", policy_value - expert_value, "Grad Regularizer:", lipschitz_reg)
         print_op = tf.no_op()
         self.train = tf_util.function(
             [self.policy_obs_ph, self.policy_acs_ph, self.policy_gammas_ph,
@@ -587,9 +586,9 @@ class NeuralAdversaryTRPO(object):
         mixture_rewards = self.build_graph(self.mix_obs_ph, self.mix_acs_ph, reuse=True)
         grads = tf.gradients(mixture_rewards, [self.mix_obs_ph, self.mix_acs_ph])[0]
         norm = tf.cast(tf.sqrt(tf.reduce_sum(tf.square(grads), axis=1)), tf.float32)
-        grad_reg = tf.reduce_mean(tf.square(norm - 1.0))
-        grad_reg_coef = 0.0
-        grad_reg_loss = grad_reg_coef * grad_reg
+        lipschitz_reg = tf.reduce_mean(tf.square(norm - 1.0))
+        lipschitz_reg_coef = 0.0
+        lipschitz_reg_loss = lipschitz_reg_coef * lipschitz_reg
 
         rewards = tf.concat([policy_rewards, expert_rewards], 0)
 
@@ -601,7 +600,7 @@ class NeuralAdversaryTRPO(object):
         rewards_reg_loss = rewards_reg_coef * rewards_reg
 
         policy_loss = policy_value - expert_value
-        self.total_loss = policy_loss + grad_reg_loss + rewards_reg_loss
+        self.total_loss = policy_loss + lipschitz_reg_loss + rewards_reg_loss
 
         # Loss + Accuracy terms
         self.losses = []
@@ -613,7 +612,7 @@ class NeuralAdversaryTRPO(object):
         # self.reward_op = generator_rewards
 
         print_op = tf.print("Policy loss:", policy_loss,
-                            "GradReg", grad_reg,
+                            "GradReg", lipschitz_reg,
                             "rewards_abs_mean", tf.reduce_mean(tf.abs(rewards)), "rewards_std", tf.math.reduce_std(rewards),
                             "abs_max", tf.math.reduce_max(tf.abs(rewards)))
         var_list = self.get_trainable_variables()
@@ -623,7 +622,7 @@ class NeuralAdversaryTRPO(object):
              self.mix_obs_ph, self.mix_acs_ph],
             self.losses + [print_op] + [tf_util.flatgrad(self.total_loss, var_list)])
 
-        # print_op = tf.print("Value diff:", policy_value - expert_value, "Grad Regularizer:", grad_reg)
+        # print_op = tf.print("Value diff:", policy_value - expert_value, "Grad Regularizer:", lipschitz_reg)
         # print_op = tf.no_op()
         # self.train = tf_util.function(
         #     [self.policy_obs_ph, self.policy_acs_ph, self.policy_gammas_ph,
@@ -779,9 +778,9 @@ class NeuralAdversaryMDPO(object):
         mixture_rewards = self.build_graph(self.mix_obs_ph, self.mix_acs_ph, reuse=True, scope=self.scope)
         grads = tf.gradients(mixture_rewards, [self.mix_obs_ph, self.mix_acs_ph])[0]
         norm = tf.cast(tf.sqrt(tf.reduce_sum(tf.square(grads), axis=1)), tf.float32)
-        grad_reg = tf.reduce_mean(tf.square(norm - 1.0))
-        grad_reg_coef = 10
-        grad_reg_loss = grad_reg_coef * grad_reg
+        lipschitz_reg = tf.reduce_mean(tf.square(norm - 1.0))
+        lipschitz_reg_coef = 10
+        lipschitz_reg_loss = lipschitz_reg_coef * lipschitz_reg
         #
         # rewards = tf.concat([policy_rewards, expert_rewards], 0)
         #
@@ -831,7 +830,7 @@ class NeuralAdversaryMDPO(object):
 
         policy_loss = tf.reduce_sum(tf.multiply(tf.stop_gradient(old_rewards_gradient), clipped_rewards))
 
-        loss = policy_loss + bregman_loss + rewards_reg_loss + grad_reg_loss
+        loss = policy_loss + bregman_loss + rewards_reg_loss + lipschitz_reg_loss
 
         # Loss + Accuracy terms
         self.losses = [loss]
@@ -973,7 +972,7 @@ class NeuralAdversaryMDPO(object):
         return reward
 
 class NeuralAdversaryMD(object):
-    def __init__(self, sess, observation_space, action_space, hidden_size=64, entcoeff=0.001,
+    def __init__(self, sess, observation_space, action_space, hidden_size=64, entcoeff=0.001, lipschitz_reg_coef=0.0
                  scope="adversary", normalize=True):
         """
         Reward regression from observations and transitions
@@ -1046,8 +1045,7 @@ class NeuralAdversaryMD(object):
         grads = tf.gradients(mixture_rewards, [self.mix_obs_ph, self.mix_acs_ph])[0]
         norm = tf.cast(tf.sqrt(tf.reduce_sum(tf.square(grads), axis=1)), tf.float32)
         lipschitz_reg = tf.reduce_mean(tf.square(norm - 1.0))
-        lipschitz_coef = 1.0
-        lipschitz_loss = lipschitz_coef * lipschitz_reg
+        lipschitz_loss = lipschitz_reg_coef * lipschitz_reg
         #
 
         rewards = tf.concat([policy_rewards, expert_rewards], 0)
@@ -1163,7 +1161,7 @@ class NeuralAdversaryMD(object):
 
 
 
-        # print_op = tf.print("Value diff:", policy_value - expert_value, "Grad Regularizer:", grad_reg)
+        # print_op = tf.print("Value diff:", policy_value - expert_value, "Grad Regularizer:", lipschitz_reg)
         # print_op = tf.no_op()
         # self.train = tf_util.function(
         #     [self.policy_obs_ph, self.policy_acs_ph, self.policy_gammas_ph,

@@ -111,12 +111,29 @@ for curr_path in paths:
         data[env][algo] = []
     data[env][algo].append((x, y))
 
-color_id = {"mdal_linear": "#4F3466FF", "mdal_neural": "#FF6F61FF", "gail": "#FEAE51FF",
-             "mdal_trpo_linear": "#296E01FF", "mdal_trpo_neural": "#FF30AAFF", "gail_off_policy": "#135DD8FF"}
-expert_rewards = {"walker2d": 3464, "halfcheetah": 9052, "humanoid": 6494, "invertedpendulum": 1000}
-axes_order = {"walker2d": 0, "halfcheetah": 1, "humanoid": 2, "invertedpendulum": 3}
+on_policy = True
+off_policy = False
+legend = True
+if on_policy or off_policy:
+    color_id = {"mdal_linear": "#296E01FF", "mdal_neural": "#FF6F61FF", "gail": "#135DD8FF",
+                "mdal_trpo_linear": "#296E01FF", "mdal_trpo_neural": "#FF6F61FF", "gail_off_policy": "#135DD8FF"}
+else:
+    color_id = {"mdal_linear": "#4F3466FF", "mdal_neural": "#FF6F61FF", "gail": "#FF0000FF",
+                 "mdal_trpo_linear": "#296E01FF", "mdal_trpo_neural": "#FF30AAFF", "gail_off_policy": "#135DD8FF"}
+# alg_names = {"mdal_linear": "GAL Linear", "mdal_neural": "GAL Neural", "gail": "GAIL",
+#              "mdal_trpo_linear": "GAL Linear TRPO", "mdal_trpo_neural": "GAL Neural TRPO", "gail_off_policy": "GAIL MDPO",
+#              "Expert": "Expert"}
+alg_names = {"mdal_linear": "GAL Linear", "mdal_neural": "GAL Neural", "gail": "GAIL",
+             "mdal_trpo_linear": "GAL Linear", "mdal_trpo_neural": "GAL Neural", "gail_off_policy": "GAIL",
+             "Expert": "Expert"}
+expert_rewards = {"walker2d": 3464, "hopper": 3053, "halfcheetah": 9052, "humanoid": 6494, "invertedpendulum": 1000}
+axes_order = {"walker2d": 0, "hopper": 1, "halfcheetah": 2, "humanoid": 3, "invertedpendulum": 4}
 
-fig, axs = plt.subplots(ncols=3, figsize=(16,5))
+uniform_legend = True
+if uniform_legend:
+    fig, axs = plt.subplots(ncols=4, figsize=(16,4))
+else:
+    fig, axs = plt.subplots(ncols=4, figsize=(16,6))
 # Plot data.
 for env_id in sorted(data.keys()):
     print('exporting {}'.format(env_id))
@@ -127,6 +144,7 @@ for env_id in sorted(data.keys()):
         continue
     axes_id = axes_order[env_id]
     ax = axs[axes_id]
+    # ax = axs[axes_id // 2][axes_id % 2]
 
     for algo in sorted(data[env_id].keys()):
         legend_entries.append(algo)
@@ -151,55 +169,57 @@ for env_id in sorted(data.keys()):
         if algo in color_id.keys():
             color = color_id[algo]
         else:
-            color = None
+            color = np.random.rand(3,)
         ax.plot(xs[0] / 1e6, mean, label=algo, color=color)
         ax.fill_between(xs[0] / 1e6, mean - ci_coef * std, mean + ci_coef * std, alpha=0.2, color=color)
-    ax.hlines(1, 0, x_max, colors='k', linestyles='dashed')
-    ax.text(0.1, 1.01, 'Expert Reward = {}'.format(expert_rewards[env_id]), fontsize=11, rotation_mode='anchor')
-    ax.set_title(env_id, fontsize=14)
-    ax.set_xlabel('Timesteps (1e6)', fontsize=11)
-    ax.set_ylabel('Mean Episode Reward', fontsize=11)
-    plt.xticks(fontsize=11)
-    plt.yticks(fontsize=11)
+    expert_line = ax.hlines(1, 0, x_max, colors='k', linestyles='dashed')
+    ax.text(0.05, 1.01, format(expert_rewards[env_id]), fontsize=11, rotation_mode='anchor')
+    if not on_policy:
+        ax.set_title(env_id, fontsize=14)
+    if not off_policy:
+        ax.set_xlabel('Timesteps (1e6)', fontsize=11)
+    if axes_id == 0:
+        ax.set_ylabel('Mean Episode Reward', fontsize=11)
+
+
+    # ax.set_xticks(fontsize=11)
+    # ax.set_yticks(fontsize=11)
+    ax.tick_params(axis="x", labelsize=11)
+    ax.tick_params(axis="y", labelsize=11)
     handles, labels = ax.get_legend_handles_labels()
+    handles += [expert_line]
+    labels += ['Expert']
     # order = [0, 1, 2, 3, 4]
     # legend = plt.legend([handles[idx] for idx in order],[labels[idx] for idx in order], ncol=5)
-    legend = ax.legend(handles, labels, ncol=3, bbox_to_anchor=(0.5, -0.35), loc='lower center')
+    if not uniform_legend and legend:
+        legend = ax.legend(handles, labels, ncol=1, bbox_to_anchor=(0.5, -1.3), loc='lower center')
     # legend = ax.legend(handles, labels, loc='lower center')
-    fig.subplots_adjust(bottom=0.3)
+        fig.subplots_adjust(bottom=0.5)
     # env_fig.axes[0] = ax
-    import pickle
-    p = pickle.dumps(ax)
-    env_ax = pickle.loads(p)
-    env_ax.change_geometry(1,1,1)
-    env_fig = plt.figure(figsize=(16,5))
-    env_fig._axstack.add(env_fig._make_key(env_ax), env_ax)
-    env_fig.axes.append(env_ax)
-    env_fig.subplots_adjust(bottom=0.3)
 
-    env_fig.savefig(os.path.join(args.dir, 'fig_{}.png'.format(env_id)))
-
-    # # legend = plt.legend(loc='upper right')
+    # Uncomment for separate graphs
+    # import pickle
+    # p = pickle.dumps(ax)
+    # env_ax = pickle.loads(p)
+    # env_ax.change_geometry(1,1,1)
     #
-    # # plt.savefig(os.path.join(args.dir, 'fig_{}.png'.format(env_id)))
+    # env_fig = plt.figure(figsize=(13,8))
+    # env_fig._axstack.add(env_fig._make_key(env_ax), env_ax)
+    # env_fig.axes.append(env_ax)
+    # env_fig.tight_layout()
+    # plt.gca().set_aspect('equal', adjustable='box', anchor='NW')
+    # env_ax.legend(handles, labels, ncol=1, bbox_to_anchor=(0.5, -0.9), loc='lower center')
     #
-    #
-    # def export_legend(legend, filename="legend.png", expand=[-10, -10, 10, 10]):
-    #     fig = legend.figure
-    #     fig.canvas.draw()
-    #     bbox = legend.get_window_extent()
-    #     bbox = bbox.from_extents(*(bbox.extents + np.array(expand)))
-    #     bbox = bbox.transformed(fig.dpi_scale_trans.inverted())
-    #     fig.savefig(os.path.join(args.dir, filename), dpi="figure", bbox_inches=bbox)
-    #
-    #
-    # export_legend(legend)
+    # env_fig.subplots_adjust(bottom=0.4)
+    # env_fig.savefig(os.path.join(args.dir, 'fig_{}.png'.format(env_id)))
 
 
-    # img = Image.open(os.path.join(args.dir, 'legend.png')).convert('RGBA')
-    # img = Image.open(os.path.join(args.dir, 'fig_{}.png'.format(env_id))).convert('RGBA')
-    # arr = np.array(img)
-    # arr = np.transpose(arr, (2, 0, 1))
-    # vis.image(arr)
+if uniform_legend:
+    labels = [alg_names[label] for label in labels]
+    if legend:
+        legend = ax.legend(handles, labels, ncol=7, bbox_to_anchor=(2.23, -0.5), loc='lower center', fontsize=11)
+    fig.subplots_adjust(bottom=0.3)
+    # fig.set_figwidth(14)
 
-fig.savefig(os.path.join(args.dir, 'results.png'.format(env_id)))
+
+fig.savefig(os.path.join(args.dir, 'results.png'.format(env_id)), bbox_inches='tight')

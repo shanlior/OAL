@@ -44,7 +44,7 @@ class MDAL_TRPO(TRPO):
                  hidden_size_adversary=100, adversary_entcoeff=0, # timesteps_per_batch=2000,
                  g_step=3, d_step=1, d_stepsize=3e-4, verbose=0,
                  _init_setup_model=True, exploration_bonus=False, bonus_coef=0.01, is_action_features=True,
-                 neural=False, sgd_steps=1, **kwargs):
+                 neural=False, sgd_steps=1, lipschitz=1.0, **kwargs):
         super().__init__(policy, env, verbose=verbose, _init_setup_model=False, **kwargs)
         self.using_mdal = True
         self.expert_dataset = expert_dataset
@@ -59,6 +59,7 @@ class MDAL_TRPO(TRPO):
         self.is_action_features = is_action_features
         self.neural = neural
         self.sgd_steps = sgd_steps
+        self.lipschitz = lipschitz
 
 
         if _init_setup_model:
@@ -177,7 +178,7 @@ class MDAL_MDPO_OFF(MDPO_OFF):
                  hidden_size_adversary=100, adversary_entcoeff=0, timesteps_per_batch=2000,
                  g_step=1, d_step=10, d_stepsize=3e-4, verbose=0,
                  _init_setup_model=True, exploration_bonus=False, bonus_coef=0.01, is_action_features=True,
-                  neural=False, **kwargs):
+                  neural=False, lipschitz=1.0, **kwargs):
         super().__init__(policy, env, verbose=verbose, _init_setup_model=False, **kwargs)
         self.observation_space = env.observation_space
         self.action_space = env.action_space
@@ -194,7 +195,7 @@ class MDAL_MDPO_OFF(MDPO_OFF):
         self.bonus_coef = bonus_coef
         self.is_action_features = is_action_features
         self.neural = neural
-
+        self.lipschitz = lipschitz
         if _init_setup_model:
             self.setup_model()
 
