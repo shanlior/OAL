@@ -206,7 +206,7 @@ def main():
         train(args.env, algo=args.algo, num_timesteps=args.num_timesteps, seed=(seed+args.seed_offset),
               expert_model=args.expert_model, expert_path=args.expert_path, num_trajectories=args.num_trajectories,
               is_action_features=is_action_features,
-              sgd_steps=args.sgd_steps, mdpo_update_steps=args.mdpo_update_steps, lipschitz=args.lipschitz
+              sgd_steps=args.sgd_steps, mdpo_update_steps=args.mdpo_update_steps, lipschitz=args.lipschitz,
               t_pi=args.t_pi, t_c=args.t_c, lam=args.lam, log=log,
               pretrain=args.pretrain, pretrain_epochs=args.pretrain_epochs,
               exploration_bonus=args.exploration, bonus_coef=args.bonus_coef,
