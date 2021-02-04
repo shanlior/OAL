@@ -319,7 +319,8 @@ class TransitionClassifierMDPO(object):
         rewards_optimizer = tf.train.AdamOptimizer(learning_rate=3e-4)
         rewards_train_op = rewards_optimizer.minimize(self.total_loss, var_list=var_list)
         self.train = tf_util.function(
-            [self.generator_obs_ph, self.generator_acs_ph, self.expert_obs_ph, self.expert_acs_ph],
+            [self.generator_obs_ph, self.generator_acs_ph, self.expert_obs_ph, self.expert_acs_ph,
+             self.mix_obs_ph, self.mix_acs_ph],
             rewards_train_op)
         # self.lossandgrad = tf_util.function(
         #     [self.generator_obs_ph, self.generator_acs_ph, self.expert_obs_ph, self.expert_acs_ph],

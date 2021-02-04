@@ -692,7 +692,7 @@ class MDPO_OFF(OffPolicyRLModel):
                         d_losses = []  # list of tuples, each of which gives the loss for a minibatch
                         # NOTE: for recurrent policies, use shuffle=False?
 
-                        ob_batch, ac_batch = batch_buffer['obs'], batch_buffer['acs']
+                        ob_batch, ac_batch = np.array(batch_buffer['obs']), np.array(batch_buffer['acs'])
                         ob_expert, ac_expert = self.expert_dataset.get_next_batch()
                         # update running mean/std for reward_giver
 

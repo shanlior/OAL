@@ -1,4 +1,7 @@
 # DEPRECATED, use baselines.common.plot_util instead
+on_policy = False
+
+
 
 import os
 import matplotlib.pyplot as plt
@@ -71,9 +74,14 @@ parser.add_argument('--smooth', type=int, default=1)
 # parser.add_argument('--name', type=str, default='None')
 args = parser.parse_args()
 
+off_policy = not on_policy
+if on_policy:
+    method = 'on_policy'
+else:
+    method = 'off_policy'
 # Load all data.
 data = {}
-paths = [os.path.abspath(os.path.join(path, '..')) for path in glob2.glob(os.path.join(args.dir, '**', 'progress.csv'))]
+paths = [os.path.abspath(os.path.join(path, '..')) for path in glob2.glob(os.path.join(args.dir, method, '**', 'progress.csv'))]
 
 for curr_path in paths:
     if not os.path.isdir(curr_path):
@@ -111,8 +119,7 @@ for curr_path in paths:
         data[env][algo] = []
     data[env][algo].append((x, y))
 
-on_policy = True
-off_policy = False
+
 legend = True
 if on_policy or off_policy:
     color_id = {"mdal_linear": "#296E01FF", "mdal_neural": "#FF6F61FF", "gail": "#135DD8FF",
@@ -123,8 +130,8 @@ else:
 # alg_names = {"mdal_linear": "GAL Linear", "mdal_neural": "GAL Neural", "gail": "GAIL",
 #              "mdal_trpo_linear": "GAL Linear TRPO", "mdal_trpo_neural": "GAL Neural TRPO", "gail_off_policy": "GAIL MDPO",
 #              "Expert": "Expert"}
-alg_names = {"mdal_linear": "GAL Linear", "mdal_neural": "GAL Neural", "gail": "GAIL",
-             "mdal_trpo_linear": "GAL Linear", "mdal_trpo_neural": "GAL Neural", "gail_off_policy": "GAIL",
+alg_names = {"mdal_linear": "OAL Linear", "mdal_neural": "OAL Neural", "gail": "GAIL",
+             "mdal_trpo_linear": "OAL Linear", "mdal_trpo_neural": "OAL Neural", "gail_off_policy": "GAIL",
              "Expert": "Expert"}
 expert_rewards = {"walker2d": 3464, "hopper": 3053, "halfcheetah": 9052, "humanoid": 6494, "invertedpendulum": 1000}
 axes_order = {"walker2d": 0, "hopper": 1, "halfcheetah": 2, "humanoid": 3, "invertedpendulum": 4}
@@ -145,7 +152,7 @@ for env_id in sorted(data.keys()):
     axes_id = axes_order[env_id]
     ax = axs[axes_id]
     # ax = axs[axes_id // 2][axes_id % 2]
-
+    x_max_total = 0
     for algo in sorted(data[env_id].keys()):
         legend_entries.append(algo)
         xs, ys = zip(*data[env_id][algo])
@@ -156,6 +163,8 @@ for env_id in sorted(data.keys()):
         xs, ys = pad(xs), pad(ys)
         assert xs.shape == ys.shape
         x_max = np.max(xs) / 1e6
+        if x_max > x_max_total:
+            x_max_total = x_max
         mean = np.mean(ys, axis=0) / expert_rewards[env_id]
         std = np.nanstd(ys, axis=0)
         nSeeds = ys.shape[0]
@@ -172,7 +181,7 @@ for env_id in sorted(data.keys()):
             color = np.random.rand(3,)
         ax.plot(xs[0] / 1e6, mean, label=algo, color=color)
         ax.fill_between(xs[0] / 1e6, mean - ci_coef * std, mean + ci_coef * std, alpha=0.2, color=color)
-    expert_line = ax.hlines(1, 0, x_max, colors='k', linestyles='dashed')
+    expert_line = ax.hlines(1, 0, x_max_total, colors='k', linestyles='dashed')
     ax.text(0.05, 1.01, format(expert_rewards[env_id]), fontsize=11, rotation_mode='anchor')
     if not on_policy:
         ax.set_title(env_id, fontsize=14)
@@ -217,9 +226,11 @@ for env_id in sorted(data.keys()):
 if uniform_legend:
     labels = [alg_names[label] for label in labels]
     if legend:
-        legend = ax.legend(handles, labels, ncol=7, bbox_to_anchor=(2.23, -0.5), loc='lower center', fontsize=11)
+        # legend = ax.legend(handles, labels, ncol=7, bbox_to_anchor=(2.23, -0.5), loc='lower center', fontsize=11)
+        legend = axs[3].legend(handles, labels, ncol=1, loc='right', bbox_to_anchor=(1, 0.33), fontsize=9)
+
     fig.subplots_adjust(bottom=0.3)
     # fig.set_figwidth(14)
 
 
-fig.savefig(os.path.join(args.dir, 'results.png'.format(env_id)), bbox_inches='tight')
+fig.savefig(os.path.join(args.dir, method, '{}.png'.format(method)), bbox_inches='tight')

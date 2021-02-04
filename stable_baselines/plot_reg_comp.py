@@ -110,15 +110,15 @@ for curr_path in paths:
     if algo not in data[env]:
         data[env][algo] = []
     data[env][algo].append((x, y))
-
-color_id = {"0": "#4F3466FF", "0.01": "#135DD8FF", "0.1": "#FF0000FF", "1": "#296E01FF"}
-alg_names = {"mdal_linear": "GAL Linear", "mdal_neural": "GAL Neural", "gail": "GAIL",
-             "mdal_trpo_linear": "GAL Linear TRPO", "mdal_trpo_neural": "GAL Neural TRPO", "gail_off_policy": "GAIL MDPO",
+color_id = {"0": "#135DD8FF", "0.01": "#135DD8FF", "0.1": "#296E01FF", "1": "#FF6F61FF"}
+alg_names = {"mdal_linear": "OAL Linear", "mdal_neural": "OAL Neural", "gail": "GAIL",
+             "mdal_trpo_linear": "OAL Linear TRPO", "mdal_trpo_neural": "OAL Neural TRPO", "gail_off_policy": "GAIL MDPO",
              "Expert": "Expert"}
-expert_rewards = {"GAIL": 9052, "GAL": 9052}
-axes_order = {"GAL": 0, "GAIL": 1}
+expert_rewards = {"OAL": 9052, "GAIL": 9052}
+axes_order = {"OAL": 0, "GAIL": 1}
 
 uniform_legend = True
+legend_all = False
 if uniform_legend:
     fig, axs = plt.subplots(ncols=2, figsize=(9,4))
 else:
@@ -181,11 +181,16 @@ for env_id in sorted(data.keys()):
     # labels += ['Expert']
     # order = [0, 1, 2, 3, 4]
     # legend = plt.legend([handles[idx] for idx in order],[labels[idx] for idx in order], ncol=5)
-    if axes_id == 1:
-        legend = ax.legend(handles, labels, ncol=1, loc='lower right')
-    # legend = ax.legend(handles, labels, loc='lower center')
+    if not legend_all:
+        if axes_id == 1:
+            legend = ax.legend(handles, labels, ncol=1, loc='lower right')
+            fig.subplots_adjust(bottom=0.5)
+
+    else:
+        legend = ax.legend(handles, labels, loc='lower center')
         fig.subplots_adjust(bottom=0.5)
-    # env_fig.axes[0] = ax
+
+   # env_fig.axes[0] = ax
 
     # Uncomment for separate graphs
     # import pickle
@@ -210,4 +215,4 @@ if uniform_legend:
     # fig.set_figwidth(14)
 
 
-fig.savefig(os.path.join(args.dir, 'results.png'.format(env_id)), bbox_inches='tight')
+fig.savefig(os.path.join(args.dir, 'lipschitz.png'.format(env_id)), bbox_inches='tight')
