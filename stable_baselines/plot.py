@@ -1,5 +1,5 @@
 # DEPRECATED, use baselines.common.plot_util instead
-on_policy = False
+on_policy = True
 
 
 
@@ -138,7 +138,7 @@ axes_order = {"walker2d": 0, "hopper": 1, "halfcheetah": 2, "humanoid": 3, "inve
 
 uniform_legend = True
 if uniform_legend:
-    fig, axs = plt.subplots(ncols=4, figsize=(16,4))
+    fig, axs = plt.subplots(ncols=4, figsize=(16,3))
 else:
     fig, axs = plt.subplots(ncols=4, figsize=(16,6))
 # Plot data.
@@ -160,11 +160,16 @@ for env_id in sorted(data.keys()):
         min_len = np.min([l.shape[0] for l in xs])
         xs, ys = [x[:min_len] for x in xs], [y[:min_len] for y in ys]
 
+        if on_policy and env_id == "humanoid":
+            xs, ys = [x[:4882] for x in xs], [y[:4882] for y in ys]
+            ax.set_xlim([0,5])
         xs, ys = pad(xs), pad(ys)
         assert xs.shape == ys.shape
         x_max = np.max(xs) / 1e6
         if x_max > x_max_total:
             x_max_total = x_max
+        if on_policy and env_id == "humanoid":
+            x_max_total = 5
         mean = np.mean(ys, axis=0) / expert_rewards[env_id]
         std = np.nanstd(ys, axis=0)
         nSeeds = ys.shape[0]
