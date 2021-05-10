@@ -1,6 +1,38 @@
+# Running the OAL algorithm
+
+In order to run the OAL algorithm, use the *run_exp.py* file inside the *stable_baselines* directory.
+
+To run the off-policy version of OAL:
+```bash
+python run_exp.py --gpu 0 --env Walker2d-v3 --algo MDAL --neural --expert-path expert_walker_neural --num-timesteps 3000000 --num-seeds 5 --mdpo-update-steps 10 --sgd-steps 1 --lipschiz 1.0
+```
+
+To run the on-policy version of OAL:
+```bash
+python run_exp.py --gpu 0 --env Walker2d-v3 --algo MDAL_TRPO --neural --expert-path expert_walker_neural --num-timesteps 3000000 --num-seeds 5 --t-pi 0.01 --lipschiz 1.0
+```
+
+- The *--neural* flag determines whether to use the linear or neural costs.
+
+
+To run the off-policy version of GAIL
+```bash
+python run_exp.py --gpu 0 --env Walker2d-v3 --algo GAIL_MDPO_OFF --expert-path expert_walker_neural --num-timesteps 3000000 --num-seeds 5 --mdpo-update-steps 10 --sgd-steps 1 --lipschitz 0.0
+```
+
+
+Finally, to train an expert, use the *--train* flag. For more information, see *run_exp.py*.
+
+
+
+
+To install the package follow the instructions below:
+
 <img src="docs/\_static/img/logo.png" align="right" width="40%"/>
 
 [![Build Status](https://travis-ci.com/hill-a/stable-baselines.svg?branch=master)](https://travis-ci.com/hill-a/stable-baselines) [![Documentation Status](https://readthedocs.org/projects/stable-baselines/badge/?version=master)](https://stable-baselines.readthedocs.io/en/master/?badge=master) [![Codacy Badge](https://api.codacy.com/project/badge/Grade/3bcb4cd6d76a4270acb16b5fe6dd9efa)](https://www.codacy.com/app/baselines_janitors/stable-baselines?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=hill-a/stable-baselines&amp;utm_campaign=Badge_Grade) [![Codacy Badge](https://api.codacy.com/project/badge/Coverage/3bcb4cd6d76a4270acb16b5fe6dd9efa)](https://www.codacy.com/app/baselines_janitors/stable-baselines?utm_source=github.com&utm_medium=referral&utm_content=hill-a/stable-baselines&utm_campaign=Badge_Coverage)
+
+
 
 # Stable Baselines
 
