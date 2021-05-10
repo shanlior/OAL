@@ -1,5 +1,5 @@
 # DEPRECATED, use baselines.common.plot_util instead
-on_policy = True
+on_policy = False
 
 
 
@@ -133,14 +133,14 @@ else:
 alg_names = {"mdal_linear": "OAL Linear", "mdal_neural": "OAL Neural", "gail": "GAIL",
              "mdal_trpo_linear": "OAL Linear", "mdal_trpo_neural": "OAL Neural", "gail_off_policy": "GAIL",
              "Expert": "Expert"}
-expert_rewards = {"walker2d": 3464, "hopper": 3053, "halfcheetah": 9052, "humanoid": 6494, "invertedpendulum": 1000}
-axes_order = {"walker2d": 0, "hopper": 1, "halfcheetah": 2, "humanoid": 3, "invertedpendulum": 4}
+expert_rewards = {"walker2d": 3464, "hopper": 3053, "halfcheetah": 9052, "humanoid": 6494, "ant": 3238}
+axes_order = {"walker2d": 0, "hopper": 1, "halfcheetah": 2, "humanoid": 3, "ant": 4}
 
 uniform_legend = True
 if uniform_legend:
-    fig, axs = plt.subplots(ncols=4, figsize=(16,3))
+    fig, axs = plt.subplots(ncols=5, figsize=(16,3))
 else:
-    fig, axs = plt.subplots(ncols=4, figsize=(16,6))
+    fig, axs = plt.subplots(ncols=5, figsize=(16,6))
 # Plot data.
 for env_id in sorted(data.keys()):
     print('exporting {}'.format(env_id))
@@ -162,7 +162,10 @@ for env_id in sorted(data.keys()):
 
         if on_policy and env_id == "humanoid":
             xs, ys = [x[:4882] for x in xs], [y[:4882] for y in ys]
-            ax.set_xlim([0,5])
+            ax.set_xlim([0,3])
+        if off_policy and env_id == "ant":
+            xs, ys = [x[:1501] for x in xs], [y[:1501] for y in ys]
+            ax.set_xlim([0,3])
         xs, ys = pad(xs), pad(ys)
         assert xs.shape == ys.shape
         x_max = np.max(xs) / 1e6

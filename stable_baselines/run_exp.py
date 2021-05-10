@@ -150,7 +150,7 @@ def train(env_id, algo, num_timesteps, seed, sgd_steps, t_pi, t_c, lam, log, exp
                                       exploration_bonus=exploration_bonus, bonus_coef=bonus_coef,
                                       is_action_features=is_action_features, neural=neural, lam=0.98,
                                       timesteps_per_batch=2000, lipschitz=lipschitz)
-
+ 
             elif algo == 'GAIL':
                 from mpi4py import MPI
                 from stable_baselines import GAIL
