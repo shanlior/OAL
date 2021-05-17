@@ -4,12 +4,12 @@ In order to run the OAL algorithm, use the *run_exp.py* file inside the *stable_
 
 To run the off-policy version of OAL:
 ```bash
-python run_exp.py --gpu 0 --env Walker2d-v3 --algo MDAL --neural --expert-path expert_walker_neural --num-timesteps 3000000 --num-seeds 5 --mdpo-update-steps 10 --sgd-steps 1 --lipschiz 1.0
+python run_exp.py --gpu 0 --env Walker2d-v3 --algo MDAL --neural --expert-path expert_walker_neural --num-timesteps 3000000 --num-seeds 5 --mdpo-update-steps 10 --sgd-steps 1 --lipschitz 1.0
 ```
 
 To run the on-policy version of OAL:
 ```bash
-python run_exp.py --gpu 0 --env Walker2d-v3 --algo MDAL_TRPO --neural --expert-path expert_walker_neural --num-timesteps 3000000 --num-seeds 5 --t-pi 0.01 --lipschiz 1.0
+python run_exp.py --gpu 0 --env Walker2d-v3 --algo MDAL_TRPO --neural --expert-path expert_walker_neural --num-timesteps 3000000 --num-seeds 5 --t-pi 0.01 --lipschitz 1.0
 ```
 
 - The *--neural* flag determines whether to use the linear or neural costs.
